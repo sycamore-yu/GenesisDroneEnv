@@ -1,0 +1,21 @@
+{
+  "mixer": "passed",
+  "single_step": [
+    {"dimension": 0, "analytical": -0.0015421130, "numerical": -0.0015497208},
+    {"dimension": 1, "analytical": 0.0048600719, "numerical": 0.0047981739},
+    {"dimension": 2, "analytical": -0.0032400498, "numerical": -0.0031590462},
+    {"dimension": 3, "analytical": 0.0001210154, "numerical": 0.0001192093}
+  ],
+  "ten_step": [
+    {"step": 0, "dimension": 0, "analytical": -0.0042424370, "numerical": -0.0042498112},
+    {"step": 3, "dimension": 1, "analytical": 0.0043300688, "numerical": 0.0043272972},
+    {"step": 6, "dimension": 2, "analytical": -0.0016835006, "numerical": -0.0016808510},
+    {"step": 9, "dimension": 3, "analytical": 0.0000149975, "numerical": 0.0000119209}
+  ],
+  "optimization": {
+    "horizon": 32,
+    "iterations": 25,
+    "initial_loss": 1.4545981884,
+    "final_loss": 1.4513725042
+  }
+}

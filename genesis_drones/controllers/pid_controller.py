@@ -140,7 +140,7 @@ class PIDcontroller:
         if self.use_rc is True:
             self.pid_update_TpaFactor() 
             if(self.rc_command[5] == 0):        # not arm
-                self.drone.set_propellels_rpm(torch.zeros((self.num_envs, 4), device=self.device, dtype=gs.tc_float))
+                self.drone.set_propellers_rpm(torch.zeros((self.num_envs, 4), device=self.device, dtype=gs.tc_float))
                 return
             if self.rc_command[4] == 0:         # angle mode
                 self.angle_controller(action)
@@ -151,7 +151,7 @@ class PIDcontroller:
                 return
         else:
             self.controller(action)
-        self.drone.set_propellels_rpm(self.mixer(action))
+        self.drone.set_propellers_rpm(self.mixer(action))
 
     def rate_controller(self, action=None): 
         """

@@ -1,0 +1,22 @@
+{
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU, 8 GB",
+  "horizon": 32,
+  "selection_rule": "largest tested power of two with at least 20% estimated VRAM headroom",
+  "apg": [
+    {"num_envs": 1024, "estimated_peak_memory_bytes": 1640947712, "estimated_headroom": 0.8088635496},
+    {"num_envs": 2048, "estimated_peak_memory_bytes": 1854857216, "estimated_headroom": 0.7839475191},
+    {"num_envs": 4096, "estimated_peak_memory_bytes": 2259607552, "estimated_headroom": 0.7368024809},
+    {"num_envs": 8192, "estimated_peak_memory_bytes": 3098468352, "estimated_headroom": 0.6390925573},
+    {"num_envs": 16384, "estimated_peak_memory_bytes": 4780384256, "estimated_headroom": 0.4431841603},
+    {"num_envs": 32768, "estimated_peak_memory_bytes": 8146313216, "estimated_headroom": 0.0511230916}
+  ],
+  "shac": [
+    {"num_envs": 1024, "estimated_peak_memory_bytes": 1689182208, "estimated_headroom": 0.8032452290},
+    {"num_envs": 2048, "estimated_peak_memory_bytes": 1924063232, "estimated_headroom": 0.7758864504},
+    {"num_envs": 4096, "estimated_peak_memory_bytes": 2406408192, "estimated_headroom": 0.7197032443},
+    {"num_envs": 8192, "estimated_peak_memory_bytes": 3423526912, "estimated_headroom": 0.6012299618},
+    {"num_envs": 16384, "estimated_peak_memory_bytes": 5503901696, "estimated_headroom": 0.3589093511},
+    {"num_envs": 32768, "estimated_peak_memory_bytes": 8585216000, "estimated_headroom": 0.0}
+  ],
+  "selected": {"apg": 16384, "shac": 16384}
+}

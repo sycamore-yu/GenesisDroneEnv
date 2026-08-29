@@ -57,7 +57,7 @@ pip install -e .
 ## 🎬 Demos & Usage
 
 ### 1. RL Tracking Task
-Train or evaluate a policy to track a moving target.
+Train or evaluate a policy for sequential random stationary waypoints.
 
 #### Evaluate Pretrained Model:
 ```bash
@@ -72,7 +72,38 @@ python scripts/train/track_train.py
 
 > **Note:** Training typically converges around the 200th step. You can fine-tune the reward scale in `rl_env.yaml`.
 
-### 2. SE(3) Geometric Controller
+### 2. Differentiable RL Tracking
+Validate the motor allocation and Genesis gradients before training:
+```bash
+python scripts/eval/track_diff_gradcheck.py
+```
+
+Measure the stable parallel environment count for each algorithm:
+```bash
+python scripts/eval/track_diff_benchmark.py --algo apg --num-envs 1024
+python scripts/eval/track_diff_benchmark.py --algo shac --num-envs 1024
+```
+
+Train Adaptive Policy Gradient (APG) or Short-Horizon Actor-Critic (SHAC):
+```bash
+python scripts/train/track_diff_train.py --algo apg
+python scripts/train/track_diff_train.py --algo shac
+```
+
+Compare the best APG and SHAC checkpoints with the existing PPO policy on the shared test scenarios:
+```bash
+python scripts/eval/track_diff_eval.py \
+  --apg-checkpoint logs/track_diff/apg_RUN/best.pt \
+  --shac-checkpoint logs/track_diff/shac_RUN/best.pt \
+  --output-dir logs/track_diff/evaluation
+```
+
+The differentiable environment returns `obs, (loss, reward), done, extras`. APG and SHAC optimize `loss`; detached
+`reward` and task metrics are used for logging and evaluation.
+
+The implementations adapted from DiffAero retain their BSD 3-Clause notice in `THIRD_PARTY_NOTICES`.
+
+### 3. SE(3) Geometric Controller
 Replace the neural network with a classical geometric controller for precise maneuvers.
 
 #### Run Trajectory Tracking:
@@ -88,7 +119,7 @@ The controller implements the framework proposed in:
 - [Geometric tracking control of a quadrotor UAV on SE(3)](https://ieeexplore.ieee.org/document/5717652)
 - [Control of Quadrotors Using the Hopf Fibration on SO(3)](https://link.springer.com/chapter/10.1007/978-3-030-28619-4_20)
 
-### 3. 🎮 Hardware-in-the-Loop (FPV)
+### 4. 🎮 Hardware-in-the-Loop (FPV)
 Fly the simulated drone using your real Radio Controller (RC) via a Flight Controller (FCU) bridge.
 
 <div align="center"> <img src="docs/FPV.gif" alt="FPV Flight" width="80%"/> </div>
@@ -126,6 +157,7 @@ Customize the simulation to fit your needs by editing the YAML files in the `con
 | **Flight Dynamics** | `config/*/flight.yaml` | PID gains, physical properties (mass, inertia). |
 | **Environment** | `config/*/genesis_env.yaml` | Physics engine settings, rendering, scene setup. |
 | **RL Hyperparams** | `config/*/rl_env.yaml` | Reward functions, observation space, training steps. |
+| **Differentiable RL** | `config/track_diff/train.yaml` | APG, SHAC, loss, safety, and evaluation settings. |
 
 ---
 

@@ -1,0 +1,64 @@
+seed: 1
+updates: 1000
+save_interval: 100
+log_root: logs/track_diff
+validation_scenarios: 256
+validation_seed: 20250828
+test_scenarios: 1024
+test_seed: 20250829
+num_envs:
+  apg: 1024
+  shac: 1024
+
+network:
+  hidden_sizes: [256, 128]
+
+environment:
+  horizon: 32
+  body_collision_radius: 0.06
+  body_collision_half_height: 0.0125
+  ground_warning_distance: 0.2
+  horizontal_warning_distance: 0.5
+  vertical_warning_distance: 0.12
+  safety_temperature_ratio: 0.1
+  motor_arm: 0.1
+  moment_coefficient: 7.94e-12
+
+loss_weights:
+  position: 3.0
+  velocity: 1.0
+  tilt: 0.1
+  yaw: 0.1
+  angular_velocity: 0.001
+  action_delta: 0.001
+  safety: 5.0
+  terminal: 10.0
+
+reward_weights:
+  position: 3.0
+  velocity: 1.0
+  tilt: 0.1
+  yaw: 0.1
+  angular_velocity: 0.001
+  action_delta: 0.001
+  safety: 5.0
+  terminal: 0.0
+
+apg:
+  horizon: 32
+  learning_rate: 0.001
+  max_grad_norm: 1.0
+
+shac:
+  horizon: 32
+  actor_learning_rate: 0.001
+  critic_learning_rate: 0.003
+  gamma: 0.99
+  td_lambda: 0.95
+  entropy_weight: 0.01
+  actor_max_grad_norm: 1.0
+  critic_max_grad_norm: 1.0
+  critic_minibatches: 8
+  target_update_rate: 0.005
+  log_standard_deviation_min: -5.0
+  log_standard_deviation_max: 2.0
