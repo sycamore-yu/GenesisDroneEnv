@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 from pathlib import Path
 
@@ -20,6 +21,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-envs", type=int, required=True)
     parser.add_argument("--updates", type=int, default=64)
     parser.add_argument("--validation-scenarios", type=int, default=256)
+    parser.add_argument("--warmup-updates", type=int, default=2)
+    parser.add_argument("--max-growth-bytes", type=int)
+    parser.add_argument("--report-live-tensors", action="store_true")
+    parser.add_argument("--collect-garbage", action="store_true")
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config" / "track_diff" / "train.yaml")
     return parser.parse_args()
 
@@ -41,9 +46,14 @@ def main() -> None:
     observation = environment.reset()
     validation_environment.reset()
     minimum_free_memory = torch.cuda.mem_get_info()[0]
+    allocated_history = []
     for _ in range(args.updates):
         observation, stats = agent.update(environment, observation, normalizer)
+        torch.cuda.synchronize()
         minimum_free_memory = min(minimum_free_memory, torch.cuda.mem_get_info()[0])
+        if args.collect_garbage:
+            gc.collect()
+        allocated_history.append(torch.cuda.memory_allocated())
         if environment.episode_step >= settings.environment.max_episode_steps or not environment.is_alive.any():
             observation = environment.reset()
     free_memory, total_memory = torch.cuda.mem_get_info()
@@ -52,6 +62,15 @@ def main() -> None:
     current_reserved = torch.cuda.memory_reserved()
     non_torch_memory = max(0, total_memory - free_memory - current_reserved)
     estimated_peak_memory = non_torch_memory + peak_reserved
+    measured_allocated = allocated_history[args.warmup_updates :]
+    allocated_growth = max(measured_allocated) - min(measured_allocated) if measured_allocated else 0
+    live_tensor_shapes = {}
+    if args.report_live_tensors:
+        for value in gc.get_objects():
+            if isinstance(value, torch.Tensor) and value.is_cuda:
+                key = str(tuple(value.shape))
+                count, elements = live_tensor_shapes.get(key, (0, 0))
+                live_tensor_shapes[key] = (count + 1, elements + value.numel())
     result = {
         "algorithm": args.algo,
         "num_envs": args.num_envs,
@@ -59,7 +78,10 @@ def main() -> None:
         "updates": args.updates,
         "validation_scenarios": args.validation_scenarios,
         "actor_grad_norm": stats.actor_grad_norm,
+        "allocated_history_bytes": allocated_history,
+        "allocated_growth_after_warmup_bytes": allocated_growth,
         "peak_allocated_bytes": peak_allocated,
+        "live_tensor_shapes": live_tensor_shapes,
         "peak_reserved_bytes": peak_reserved,
         "non_torch_memory_bytes": non_torch_memory,
         "estimated_peak_memory_bytes": estimated_peak_memory,
@@ -69,6 +91,11 @@ def main() -> None:
         "meets_twenty_percent_headroom": estimated_peak_memory <= 0.8 * total_memory,
     }
     print(json.dumps(result, indent=2))
+    if args.max_growth_bytes is not None and allocated_growth > args.max_growth_bytes:
+        raise RuntimeError(
+            f"allocated memory grew by {allocated_growth} bytes after warmup; "
+            f"limit is {args.max_growth_bytes} bytes"
+        )
 
 
 if __name__ == "__main__":

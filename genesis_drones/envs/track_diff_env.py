@@ -167,6 +167,11 @@ class TrackDiffEnv:
             solver_state.dofs_vel[:, dof_start + 3 : dof_start + 6],
         )
 
+    def backward(self, physics_loss: torch.Tensor, policy_loss: torch.Tensor) -> None:
+        self.scene.backward(physics_loss)
+        torch.autograd.backward(policy_loss)
+        self.scene.sim.reset_grad()
+
     def _make_observation(self, state: DroneState) -> torch.Tensor:
         quaternion = torch.where(state.quaternion[:, :1] < 0.0, -state.quaternion, state.quaternion)
         w = quaternion[:, 0]
@@ -351,16 +356,19 @@ class TrackDiffEnv:
         is_arrived = is_alive_before & ~is_newly_dead & (distance < self.config.target_threshold)
 
         loss_weights = self.config.loss_weights
-        continuous_loss = (
+        physics_loss = (
             loss_weights.position * position_loss
             + loss_weights.velocity * velocity_loss
             + loss_weights.tilt * tilt_loss
             + loss_weights.yaw * yaw_loss
             + loss_weights.angular_velocity * angular_velocity_loss
-            + loss_weights.action_delta * action_delta_loss
             + loss_weights.safety * safety_loss
         )
-        loss = continuous_loss * is_alive_before + loss_weights.terminal * is_newly_dead
+        physics_loss = physics_loss * is_alive_before + loss_weights.terminal * is_newly_dead
+        # The zero-valued force term lets the final Torch backward release every Genesis input graph in the window.
+        policy_loss = (
+            loss_weights.action_delta * action_delta_loss + generalized_force.sum(dim=-1) * 0.0
+        ) * is_alive_before
 
         reward_weights = self.config.reward_weights
         reward_penalty = (
@@ -428,7 +436,7 @@ class TrackDiffEnv:
                 "position_error": (distance * is_alive_before).detach(),
             },
         }
-        return observation, (loss, reward), done.detach(), extras
+        return observation, (physics_loss, policy_loss, reward), done.detach(), extras
 
     def state_dict(self) -> dict:
         drone_state = self._read_state()
@@ -473,13 +481,11 @@ class TrackDiffEnv:
         return self.detach_window()
 
     def detach_window(self) -> torch.Tensor:
-        # Scene.backward() runs torch.autograd.backward with retain_graph=True so the simulator unroll can re-enter
-        # the graph, and it never releases it. Without this reset the retained graph and the simulator's queried
-        # states accumulate every window (~113 MiB per update at 1024 envs) until the process runs out of memory.
-        self.scene.sim.reset_grad()
         self.target_position = detached_torch_tensor(self.target_position)
         self.last_action = detached_torch_tensor(self.last_action)
         self.is_alive = detached_torch_tensor(self.is_alive)
+        if self.waypoint_sequences is not None:
+            self.waypoint_sequences = detached_torch_tensor(self.waypoint_sequences)
         self.waypoint_index = detached_torch_tensor(self.waypoint_index)
         self.waypoint_count = detached_torch_tensor(self.waypoint_count)
         self.first_arrival_step = detached_torch_tensor(self.first_arrival_step)

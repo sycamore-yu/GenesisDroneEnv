@@ -98,8 +98,9 @@ python scripts/eval/track_diff_eval.py \
   --output-dir logs/track_diff/evaluation
 ```
 
-The differentiable environment returns `obs, (loss, reward), done, extras`. APG and SHAC optimize `loss`; detached
-`reward` and task metrics are used for logging and evaluation.
+The differentiable environment returns `obs, (physics_loss, policy_loss, reward), done, extras`. APG and SHAC send
+state-derived `physics_loss` through Genesis, then backpropagate direct Actor regularization in `policy_loss` with
+ordinary PyTorch. Detached `reward` and task metrics are used for logging and evaluation.
 
 The implementations adapted from DiffAero retain their BSD 3-Clause notice in `THIRD_PARTY_NOTICES`.
 

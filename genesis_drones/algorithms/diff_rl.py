@@ -215,20 +215,24 @@ class ApgAgent:
     ) -> tuple[torch.Tensor, UpdateStats]:
         steps = self.config.horizon
         tracked = environment.is_alive.clone()
-        actor_loss = observation.new_zeros(())
+        physics_loss = observation.new_zeros(())
+        policy_loss = observation.new_zeros(())
         reward_sum = observation.new_zeros(())
         for _ in range(steps):
             is_alive_before = environment.is_alive.clone()
             normalizer.update(observation, is_alive_before)
             action = self.actor(normalizer(observation))
-            observation, (loss, reward), _, _ = environment.step(action)
-            actor_loss = actor_loss + loss.sum()
+            observation, (step_physics_loss, step_policy_loss, reward), _, _ = environment.step(action)
+            physics_loss = physics_loss + step_physics_loss.sum()
+            policy_loss = policy_loss + step_policy_loss.sum()
             reward_sum = reward_sum + reward.sum()
 
         denominator = tracked.sum().clamp_min(1) * steps
-        actor_loss = actor_loss / denominator
+        physics_loss = physics_loss / denominator
+        policy_loss = policy_loss / denominator
+        actor_loss = physics_loss + policy_loss
         self.optimizer.zero_grad()
-        environment.scene.backward(actor_loss)
+        environment.backward(physics_loss, policy_loss)
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config.max_grad_norm)
         self.optimizer.step()
         observation = environment.detach_window()
@@ -292,7 +296,8 @@ class ShacAgent:
         steps = self.config.horizon
         tracked = environment.is_alive.clone()
         discount = tracked.to(dtype=observation.dtype)
-        actor_loss = observation.new_zeros(())
+        physics_actor_loss = observation.new_zeros(())
+        policy_actor_loss = observation.new_zeros(())
         entropy_sum = observation.new_zeros(())
         reward_sum = observation.new_zeros(())
         rollout = ShacRollout([], [], [], [], [], [], [])
@@ -304,11 +309,11 @@ class ShacAgent:
             action, entropy = self.actor.sample(normalized_observation)
             with torch.no_grad():
                 value = self.critic(normalized_observation.detach())
-            next_observation, (loss, reward), done, extras = environment.step(action)
+            next_observation, (physics_loss, policy_loss, reward), done, extras = environment.step(action)
             normalized_next_observation = normalizer(next_observation)
             if environment.episode_step == environment.config.max_episode_steps:
                 next_value_for_actor = self.target_critic(normalized_next_observation)
-                actor_loss = actor_loss + (
+                physics_actor_loss = physics_actor_loss + (
                     discount * self.config.gamma * next_value_for_actor * extras["truncated"]
                 ).sum()
                 next_value = next_value_for_actor.detach()
@@ -316,12 +321,13 @@ class ShacAgent:
                 with torch.no_grad():
                     next_value = self.target_critic(normalized_next_observation.detach())
 
-            actor_loss = actor_loss + (discount * loss).sum()
+            physics_actor_loss = physics_actor_loss + (discount * physics_loss).sum()
+            policy_actor_loss = policy_actor_loss + (discount * policy_loss).sum()
             entropy_sum = entropy_sum + (entropy * is_alive_before).sum()
             reward_sum = reward_sum + reward.sum()
             discount = discount * self.config.gamma * extras["alive"]
             rollout.observations.append(normalized_observation.detach())
-            rollout.losses.append(loss.detach())
+            rollout.losses.append((physics_loss + policy_loss).detach())
             rollout.values.append(value)
             rollout.next_values.append(next_value)
             rollout.dones.append(done)
@@ -329,13 +335,16 @@ class ShacAgent:
             rollout.valid.append(is_alive_before)
             observation = next_observation
 
-        actor_loss = actor_loss + (discount * self.target_critic(normalizer(observation))).sum()
+        physics_actor_loss = physics_actor_loss + (
+            discount * self.target_critic(normalizer(observation))
+        ).sum()
         denominator = tracked.sum().clamp_min(1) * steps
-        actor_loss = actor_loss / denominator
+        physics_actor_loss = physics_actor_loss / denominator
         entropy = entropy_sum / denominator
-        total_actor_loss = actor_loss - self.config.entropy_weight * entropy
+        policy_actor_loss = policy_actor_loss / denominator - self.config.entropy_weight * entropy
+        actor_loss = physics_actor_loss + policy_actor_loss
         self.actor_optimizer.zero_grad()
-        environment.scene.backward(total_actor_loss)
+        environment.backward(physics_actor_loss, policy_actor_loss)
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config.actor_max_grad_norm)
         self.actor_optimizer.step()
         observation = environment.detach_window()

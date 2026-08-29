@@ -22,17 +22,19 @@ def fixed_scenarios(horizon: int) -> TrackScenarios:
     )
 
 
-def rollout_loss(environment: TrackDiffEnv, actions, scenarios: TrackScenarios) -> torch.Tensor:
+def rollout_loss(environment: TrackDiffEnv, actions, scenarios: TrackScenarios) -> tuple[torch.Tensor, torch.Tensor]:
     environment.reset(
         scenarios.initial_position,
         scenarios.initial_quaternion,
         scenarios.waypoint_sequences,
     )
-    total_loss = 0.0
+    physics_loss = 0.0
+    policy_loss = 0.0
     for action in actions:
-        _, (loss, _), _, _ = environment.step(action)
-        total_loss = total_loss + loss.mean()
-    return total_loss / len(actions)
+        _, (step_physics_loss, step_policy_loss, _), _, _ = environment.step(action)
+        physics_loss = physics_loss + step_physics_loss.mean()
+        policy_loss = policy_loss + step_policy_loss.mean()
+    return physics_loss / len(actions), policy_loss / len(actions)
 
 
 def finite_difference(
@@ -47,8 +49,8 @@ def finite_difference(
     negative = actions.clone()
     positive[step, 0, dimension] += epsilon
     negative[step, 0, dimension] -= epsilon
-    positive_loss = rollout_loss(environment, positive, scenarios).item()
-    negative_loss = rollout_loss(environment, negative, scenarios).item()
+    positive_loss = sum(rollout_loss(environment, positive, scenarios)).item()
+    negative_loss = sum(rollout_loss(environment, negative, scenarios)).item()
     return (positive_loss - negative_loss) / (2.0 * epsilon)
 
 
@@ -100,8 +102,10 @@ def main() -> None:
 
     single_actions = torch.tensor([[[hover_action, 0.03, -0.02, 0.01]]], device=gs.device)
     single_inputs = [gs.from_torch(single_actions[0], requires_grad=True)]
-    single_loss = rollout_loss(single_analytical_environment, single_inputs, single_scenarios)
-    single_analytical_environment.scene.backward(single_loss)
+    single_physics_loss, single_policy_loss = rollout_loss(
+        single_analytical_environment, single_inputs, single_scenarios
+    )
+    single_analytical_environment.backward(single_physics_loss, single_policy_loss)
     single_results = []
     for dimension in range(4):
         analytical = single_inputs[0].grad[0, dimension].item()
@@ -126,8 +130,8 @@ def main() -> None:
     multi_actions[:, :, 2] = -0.015
     multi_actions[:, :, 3] = 0.01
     multi_inputs = [gs.from_torch(action, requires_grad=True) for action in multi_actions]
-    multi_loss = rollout_loss(multi_analytical_environment, multi_inputs, multi_scenarios)
-    multi_analytical_environment.scene.backward(multi_loss)
+    multi_physics_loss, multi_policy_loss = rollout_loss(multi_analytical_environment, multi_inputs, multi_scenarios)
+    multi_analytical_environment.backward(multi_physics_loss, multi_policy_loss)
     multi_results = []
     for step, dimension in ((0, 0), (3, 1), (6, 2), (9, 3)):
         analytical = multi_inputs[step].grad[0, dimension].item()
@@ -149,10 +153,12 @@ def main() -> None:
     optimization_losses = []
     for _ in range(25):
         action_optimizer.zero_grad()
-        loss = rollout_loss(optimization_environment, torch.tanh(action_parameters), optimization_scenarios)
-        optimization_environment.scene.backward(loss)
+        physics_loss, policy_loss = rollout_loss(
+            optimization_environment, torch.tanh(action_parameters), optimization_scenarios
+        )
+        optimization_environment.backward(physics_loss, policy_loss)
         action_optimizer.step()
-        optimization_losses.append(loss.detach().item())
+        optimization_losses.append((physics_loss + policy_loss).detach().item())
     if optimization_losses[-1] >= optimization_losses[0]:
         raise AssertionError(
             f"32-step action optimization failed: initial={optimization_losses[0]} final={optimization_losses[-1]}"
