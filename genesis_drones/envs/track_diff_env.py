@@ -70,6 +70,20 @@ def detached_torch_tensor(value: torch.Tensor) -> torch.Tensor:
     return value.as_subclass(torch.Tensor) if isinstance(value, gs.Tensor) else value
 
 
+def _detach_cached_torch_tensor(value) -> None:
+    candidates = [value]
+    unwrap = getattr(value, "_unwrap", None)
+    if callable(unwrap):
+        candidates.append(unwrap())
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        for name in ("_tc", "_T_tc"):
+            tensor = getattr(candidate, name, None)
+            if isinstance(tensor, torch.Tensor) and tensor.grad_fn is not None:
+                setattr(candidate, name, tensor.detach())
+
+
 class TrackDiffEnv:
     action_dim = 4
     observation_dim = 17
@@ -153,6 +167,7 @@ class TrackDiffEnv:
         )
         self.position_error_sum = torch.zeros(num_envs, device=self.device, dtype=gs.tc_float)
         self.position_error_steps = torch.zeros(num_envs, device=self.device, dtype=gs.tc_float)
+        self._simulation_forces: list[torch.Tensor] = []
 
     def _read_state(self) -> DroneState:
         solver_state = self.scene.rigid_solver.get_state()
@@ -167,10 +182,21 @@ class TrackDiffEnv:
             solver_state.dofs_vel[:, dof_start + 3 : dof_start + 6],
         )
 
-    def backward(self, physics_loss: torch.Tensor, policy_loss: torch.Tensor) -> None:
+    def backward(self, physics_loss: torch.Tensor, policy_loss: torch.Tensor | None = None) -> None:
         self.scene.backward(physics_loss)
-        torch.autograd.backward(policy_loss)
-        self.scene.sim.reset_grad()
+        if policy_loss is not None:
+            torch.autograd.backward(policy_loss)
+        self.release_simulation_graphs()
+
+    def release_simulation_graphs(self, physics_loss: torch.Tensor | None = None) -> None:
+        # Scene.backward keeps the torch graph (retain_graph=True). A second torch.autograd.backward
+        # with retain_graph=False frees it. Call torch.autograd.backward, not gs.Tensor.backward:
+        # the latter would re-enter Scene._backward.
+        if physics_loss is not None and physics_loss.grad_fn is not None:
+            torch.autograd.backward(physics_loss)
+        self._simulation_forces.clear()
+        _detach_cached_torch_tensor(self.scene.rigid_solver.dyn_state.dofs.ctrl_force)
+        self.last_action = detached_torch_tensor(self.last_action)
 
     def _make_observation(self, state: DroneState) -> torch.Tensor:
         quaternion = torch.where(state.quaternion[:, :1] < 0.0, -state.quaternion, state.quaternion)
@@ -208,6 +234,7 @@ class TrackDiffEnv:
         initial_quaternion: torch.Tensor | None = None,
         waypoint_sequences: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        self.release_simulation_graphs()
         self.scene.reset()
         if initial_position is None:
             initial_position = torch.empty((self.num_envs, 3), device=self.device, dtype=gs.tc_float)
@@ -277,8 +304,12 @@ class TrackDiffEnv:
         )
         force_world = thrust_axis_world * actual_wrench[:, :1]
         generalized_force = torch.cat((force_world, actual_wrench[:, 1:]), dim=-1)
-        if generalized_force.requires_grad and not isinstance(generalized_force, gs.Tensor):
-            generalized_force = gs.from_torch(generalized_force, detach=False)
+        if generalized_force.requires_grad:
+            if isinstance(generalized_force, gs.Tensor):
+                generalized_force.scene = None
+            else:
+                generalized_force = gs.from_torch(generalized_force, detach=False, requires_grad=True)
+            self._simulation_forces.append(generalized_force)
         self.drone.control_dofs_force(generalized_force)
         self.scene.step()
 
@@ -365,10 +396,7 @@ class TrackDiffEnv:
             + loss_weights.safety * safety_loss
         )
         physics_loss = physics_loss * is_alive_before + loss_weights.terminal * is_newly_dead
-        # The zero-valued force term lets the final Torch backward release every Genesis input graph in the window.
-        policy_loss = (
-            loss_weights.action_delta * action_delta_loss + generalized_force.sum(dim=-1) * 0.0
-        ) * is_alive_before
+        policy_loss = (loss_weights.action_delta * action_delta_loss) * is_alive_before
 
         reward_weights = self.config.reward_weights
         reward_penalty = (
@@ -481,6 +509,7 @@ class TrackDiffEnv:
         return self.detach_window()
 
     def detach_window(self) -> torch.Tensor:
+        self.release_simulation_graphs()
         self.target_position = detached_torch_tensor(self.target_position)
         self.last_action = detached_torch_tensor(self.last_action)
         self.is_alive = detached_torch_tensor(self.is_alive)

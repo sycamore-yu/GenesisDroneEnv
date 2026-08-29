@@ -6,6 +6,14 @@ import torch
 
 import genesis as gs
 
+from genesis_drones.algorithms.diff_rl import (
+    DeterministicActor,
+    NetworkConfig,
+    actor_action_delta_loss,
+    apply_actor_action_gradients,
+    as_simulation_action,
+    collect_simulation_action_gradients,
+)
 from genesis_drones.envs.track_diff_env import TrackDiffEnv
 from genesis_drones.evaluation.track_diff import TrackScenarios
 from genesis_drones.utils.track_diff_config import load_track_diff_settings
@@ -62,6 +70,89 @@ def assert_gradient(analytical: float, numerical: float, relative_tolerance: flo
             f"gradient mismatch: analytical={analytical:.8f} numerical={numerical:.8f} "
             f"error={error:.8f} tolerance={tolerance:.8f}"
         )
+
+
+def parameter_gradient(module: torch.nn.Module) -> torch.Tensor:
+    return torch.cat(
+        [
+            torch.zeros_like(parameter).reshape(-1) if parameter.grad is None else parameter.grad.detach().reshape(-1)
+            for parameter in module.parameters()
+        ]
+    )
+
+
+def compare_bridge_and_end_to_end(environment: TrackDiffEnv, scenarios: TrackScenarios, steps: int) -> dict:
+    hover_action = 2.0 / 3.3 - 1.0
+    actor_end_to_end = DeterministicActor(17, 4, NetworkConfig(), hover_action).to(gs.device)
+    actor_bridge = DeterministicActor(17, 4, NetworkConfig(), hover_action).to(gs.device)
+    actor_bridge.load_state_dict(actor_end_to_end.state_dict())
+
+    observation = environment.reset(
+        scenarios.initial_position,
+        scenarios.initial_quaternion,
+        scenarios.waypoint_sequences,
+    )
+    physics_loss = observation.new_zeros(())
+    policy_loss = observation.new_zeros(())
+    for _ in range(steps):
+        action = actor_end_to_end(observation)
+        observation, (step_physics_loss, step_policy_loss, _), _, _ = environment.step(action)
+        physics_loss = physics_loss + step_physics_loss.mean()
+        policy_loss = policy_loss + step_policy_loss.mean()
+    actor_end_to_end.zero_grad(set_to_none=True)
+    environment.backward(physics_loss, policy_loss)
+    end_to_end_gradient = parameter_gradient(actor_end_to_end)
+
+    observation = environment.reset(
+        scenarios.initial_position,
+        scenarios.initial_quaternion,
+        scenarios.waypoint_sequences,
+    )
+    physics_loss = observation.new_zeros(())
+    policy_loss = observation.new_zeros(())
+    actor_actions = []
+    sim_actions = []
+    previous_action = environment.last_action.detach()
+    for _ in range(steps):
+        is_alive_before = environment.is_alive.clone()
+        action_actor = actor_bridge(observation.detach())
+        action_sim = as_simulation_action(action_actor)
+        observation, (step_physics_loss, _, _), _, _ = environment.step(action_sim)
+        physics_loss = physics_loss + step_physics_loss.mean()
+        policy_loss = policy_loss + actor_action_delta_loss(
+            action_actor,
+            previous_action,
+            is_alive_before,
+            environment.config.loss_weights.action_delta,
+        ) / environment.num_envs
+        previous_action = action_actor
+        actor_actions.append(action_actor)
+        sim_actions.append(action_sim)
+    actor_bridge.zero_grad(set_to_none=True)
+    environment.scene.backward(physics_loss)
+    action_gradients = collect_simulation_action_gradients(sim_actions)
+    for action in sim_actions:
+        action.grad = None
+    environment.release_simulation_graphs(physics_loss)
+    apply_actor_action_gradients(
+        actor_actions,
+        action_gradients,
+        policy_loss,
+    )
+    bridge_gradient = parameter_gradient(actor_bridge)
+    end_to_end_norm = torch.linalg.vector_norm(end_to_end_gradient)
+    difference_norm = torch.linalg.vector_norm(bridge_gradient - end_to_end_gradient)
+    cosine = torch.nn.functional.cosine_similarity(
+        bridge_gradient.unsqueeze(0), end_to_end_gradient.unsqueeze(0)
+    ).item()
+    relative_error = (difference_norm / end_to_end_norm.clamp_min(1e-12)).item()
+    return {
+        "steps": steps,
+        "cosine_similarity": cosine,
+        "relative_error": relative_error,
+        "end_to_end_norm": end_to_end_norm.item(),
+        "bridge_norm": torch.linalg.vector_norm(bridge_gradient).item(),
+    }
 
 
 def main() -> None:
@@ -164,6 +255,10 @@ def main() -> None:
             f"32-step action optimization failed: initial={optimization_losses[0]} final={optimization_losses[-1]}"
         )
 
+    comparison_config = replace(settings.environment, horizon=4)
+    comparison_environment = TrackDiffEnv(comparison_config, 1, requires_grad=True)
+    comparison = compare_bridge_and_end_to_end(comparison_environment, fixed_scenarios(4), 4)
+
     result = {
         "mixer": "passed",
         "single_step": single_results,
@@ -173,6 +268,7 @@ def main() -> None:
             "final_loss": optimization_losses[-1],
             "iterations": len(optimization_losses),
         },
+        "bridge_vs_end_to_end": comparison,
     }
     print(json.dumps(result, indent=2))
 

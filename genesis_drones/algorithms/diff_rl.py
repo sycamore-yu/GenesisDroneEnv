@@ -69,6 +69,46 @@ def as_torch_tensor(values: torch.Tensor) -> torch.Tensor:
     return values.as_subclass(torch.Tensor) if isinstance(values, gs.Tensor) else values
 
 
+def as_simulation_action(action_actor: torch.Tensor) -> torch.Tensor:
+    return action_actor.detach().requires_grad_(True)
+
+
+def collect_simulation_action_gradients(sim_actions: list[torch.Tensor]) -> torch.Tensor:
+    gradients = []
+    for action in sim_actions:
+        if action.grad is None:
+            gradients.append(torch.zeros_like(action))
+        else:
+            gradients.append(action.grad.detach().clone())
+    return torch.stack(gradients)
+
+
+def apply_actor_action_gradients(
+    actor_actions: list[torch.Tensor],
+    action_gradients: torch.Tensor,
+    policy_loss: torch.Tensor,
+) -> None:
+    outputs = [torch.stack(actor_actions)]
+    gradients = [action_gradients]
+    if policy_loss.requires_grad:
+        outputs.append(policy_loss)
+        gradients.append(torch.ones_like(policy_loss))
+    torch.autograd.backward(outputs, gradients)
+
+
+def actor_action_delta_loss(
+    action_actor: torch.Tensor,
+    previous_action: torch.Tensor,
+    is_alive: torch.Tensor,
+    weight: float,
+    discount: torch.Tensor | None = None,
+) -> torch.Tensor:
+    per_environment = weight * torch.sum(torch.square(action_actor - previous_action), dim=-1) * is_alive
+    if discount is not None:
+        per_environment = per_environment * discount
+    return per_environment.sum()
+
+
 class RunningNormalizer(nn.Module):
     def __init__(self, size: int):
         super().__init__()
@@ -218,26 +258,44 @@ class ApgAgent:
         physics_loss = observation.new_zeros(())
         policy_loss = observation.new_zeros(())
         reward_sum = observation.new_zeros(())
+        actor_actions = []
+        sim_actions = []
+        previous_action = environment.last_action.detach()
         for _ in range(steps):
             is_alive_before = environment.is_alive.clone()
             normalizer.update(observation, is_alive_before)
-            action = self.actor(normalizer(observation))
-            observation, (step_physics_loss, step_policy_loss, reward), _, _ = environment.step(action)
+            action_actor = self.actor(normalizer(observation.detach()))
+            action_sim = as_simulation_action(action_actor)
+            observation, (step_physics_loss, _, reward), _, _ = environment.step(action_sim)
             physics_loss = physics_loss + step_physics_loss.sum()
-            policy_loss = policy_loss + step_policy_loss.sum()
+            policy_loss = policy_loss + actor_action_delta_loss(
+                action_actor,
+                previous_action,
+                is_alive_before,
+                environment.config.loss_weights.action_delta,
+            )
+            previous_action = action_actor
             reward_sum = reward_sum + reward.sum()
+            actor_actions.append(action_actor)
+            sim_actions.append(action_sim)
 
         denominator = tracked.sum().clamp_min(1) * steps
         physics_loss = physics_loss / denominator
         policy_loss = policy_loss / denominator
-        actor_loss = physics_loss + policy_loss
-        self.optimizer.zero_grad()
-        environment.backward(physics_loss, policy_loss)
+        actor_loss = (physics_loss + policy_loss).detach()
+        self.optimizer.zero_grad(set_to_none=True)
+        environment.scene.backward(physics_loss)
+        action_gradients = collect_simulation_action_gradients(sim_actions)
+        for action in sim_actions:
+            action.grad = None
+        environment.release_simulation_graphs(physics_loss)
+        physics_loss = physics_loss.detach()
+        apply_actor_action_gradients(actor_actions, action_gradients, policy_loss)
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config.max_grad_norm)
         self.optimizer.step()
         observation = environment.detach_window()
         return observation, UpdateStats(
-            actor_loss=actor_loss.detach().item(),
+            actor_loss=actor_loss.item(),
             actor_grad_norm=actor_grad_norm.item(),
             mean_reward=(reward_sum / denominator).detach().item(),
             steps=steps,
@@ -300,16 +358,20 @@ class ShacAgent:
         policy_actor_loss = observation.new_zeros(())
         entropy_sum = observation.new_zeros(())
         reward_sum = observation.new_zeros(())
+        actor_actions = []
+        sim_actions = []
+        previous_action = environment.last_action.detach()
         rollout = ShacRollout([], [], [], [], [], [], [])
 
         for _ in range(steps):
             is_alive_before = environment.is_alive.clone()
             normalizer.update(observation, is_alive_before)
-            normalized_observation = normalizer(observation)
-            action, entropy = self.actor.sample(normalized_observation)
+            normalized_observation = normalizer(observation.detach())
+            action_actor, entropy = self.actor.sample(normalized_observation)
+            action_sim = as_simulation_action(action_actor)
             with torch.no_grad():
                 value = self.critic(normalized_observation.detach())
-            next_observation, (physics_loss, policy_loss, reward), done, extras = environment.step(action)
+            next_observation, (physics_loss, policy_loss, reward), done, extras = environment.step(action_sim)
             normalized_next_observation = normalizer(next_observation)
             if environment.episode_step == environment.config.max_episode_steps:
                 next_value_for_actor = self.target_critic(normalized_next_observation)
@@ -322,7 +384,14 @@ class ShacAgent:
                     next_value = self.target_critic(normalized_next_observation.detach())
 
             physics_actor_loss = physics_actor_loss + (discount * physics_loss).sum()
-            policy_actor_loss = policy_actor_loss + (discount * policy_loss).sum()
+            policy_actor_loss = policy_actor_loss + actor_action_delta_loss(
+                action_actor,
+                previous_action,
+                is_alive_before,
+                environment.config.loss_weights.action_delta,
+                discount,
+            )
+            previous_action = action_actor
             entropy_sum = entropy_sum + (entropy * is_alive_before).sum()
             reward_sum = reward_sum + reward.sum()
             discount = discount * self.config.gamma * extras["alive"]
@@ -333,6 +402,8 @@ class ShacAgent:
             rollout.dones.append(done)
             rollout.terminated.append(extras["terminated"])
             rollout.valid.append(is_alive_before)
+            actor_actions.append(action_actor)
+            sim_actions.append(action_sim)
             observation = next_observation
 
         physics_actor_loss = physics_actor_loss + (
@@ -342,9 +413,15 @@ class ShacAgent:
         physics_actor_loss = physics_actor_loss / denominator
         entropy = entropy_sum / denominator
         policy_actor_loss = policy_actor_loss / denominator - self.config.entropy_weight * entropy
-        actor_loss = physics_actor_loss + policy_actor_loss
-        self.actor_optimizer.zero_grad()
-        environment.backward(physics_actor_loss, policy_actor_loss)
+        actor_loss = (physics_actor_loss + policy_actor_loss).detach()
+        self.actor_optimizer.zero_grad(set_to_none=True)
+        environment.scene.backward(physics_actor_loss)
+        action_gradients = collect_simulation_action_gradients(sim_actions)
+        for action in sim_actions:
+            action.grad = None
+        environment.release_simulation_graphs(physics_actor_loss)
+        physics_actor_loss = physics_actor_loss.detach()
+        apply_actor_action_gradients(actor_actions, action_gradients, policy_actor_loss)
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config.actor_max_grad_norm)
         self.actor_optimizer.step()
         observation = environment.detach_window()
@@ -390,11 +467,11 @@ class ShacAgent:
                 target_parameter.lerp_(parameter, self.config.target_update_rate)
 
         return observation, UpdateStats(
-            actor_loss=actor_loss.detach().item(),
+            actor_loss=actor_loss.item(),
             actor_grad_norm=actor_grad_norm.item(),
             mean_reward=(reward_sum / denominator).detach().item(),
-            critic_loss=critic_loss_sum / critic_updates,
-            critic_grad_norm=critic_grad_norm_sum / critic_updates,
+            critic_loss=0.0 if critic_updates == 0 else critic_loss_sum / critic_updates,
+            critic_grad_norm=0.0 if critic_updates == 0 else critic_grad_norm_sum / critic_updates,
             entropy=entropy.detach().item(),
             steps=steps,
             valid_transitions=valid.sum().item(),

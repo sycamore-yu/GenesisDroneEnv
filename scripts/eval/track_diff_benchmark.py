@@ -15,6 +15,21 @@ from genesis_drones.utils.track_diff_config import load_track_diff_settings
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def linear_slope(values: list[int]) -> float:
+    if len(values) < 2:
+        return 0.0
+    count = len(values)
+    x_mean = (count - 1) / 2.0
+    y_mean = sum(values) / count
+    numerator = 0.0
+    denominator = 0.0
+    for index, value in enumerate(values):
+        deviation = index - x_mean
+        numerator += deviation * (value - y_mean)
+        denominator += deviation * deviation
+    return numerator / denominator
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo", choices=("apg", "shac"), required=True)
@@ -40,11 +55,12 @@ def main() -> None:
         agent = ShacAgent(17, 4, 3.3, settings.network, settings.shac, gs.device)
     normalizer = RunningNormalizer(17).to(gs.device)
     environment = TrackDiffEnv(settings.environment, args.num_envs, requires_grad=True)
-    validation_environment = TrackDiffEnv(
-        settings.environment, args.validation_scenarios, requires_grad=False
-    )
     observation = environment.reset()
-    validation_environment.reset()
+    if args.validation_scenarios > 0:
+        validation_environment = TrackDiffEnv(
+            settings.environment, args.validation_scenarios, requires_grad=False
+        )
+        validation_environment.reset()
     minimum_free_memory = torch.cuda.mem_get_info()[0]
     allocated_history = []
     for _ in range(args.updates):
@@ -64,6 +80,7 @@ def main() -> None:
     estimated_peak_memory = non_torch_memory + peak_reserved
     measured_allocated = allocated_history[args.warmup_updates :]
     allocated_growth = max(measured_allocated) - min(measured_allocated) if measured_allocated else 0
+    allocated_slope = linear_slope(measured_allocated)
     live_tensor_shapes = {}
     if args.report_live_tensors:
         for value in gc.get_objects():
@@ -80,6 +97,7 @@ def main() -> None:
         "actor_grad_norm": stats.actor_grad_norm,
         "allocated_history_bytes": allocated_history,
         "allocated_growth_after_warmup_bytes": allocated_growth,
+        "allocated_slope_after_warmup_bytes_per_update": allocated_slope,
         "peak_allocated_bytes": peak_allocated,
         "live_tensor_shapes": live_tensor_shapes,
         "peak_reserved_bytes": peak_reserved,

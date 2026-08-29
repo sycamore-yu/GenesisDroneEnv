@@ -1,8 +1,25 @@
 import torch
 
-from genesis_drones.algorithms.diff_rl import DeterministicActor, NetworkConfig, RunningNormalizer
-from genesis_drones.envs.track_diff_env import TrackDiffEnvConfig, smooth_safety_penalty
+import genesis as gs
+
+from genesis_drones.algorithms.diff_rl import (
+    ApgAgent,
+    ApgConfig,
+    DeterministicActor,
+    NetworkConfig,
+    RunningNormalizer,
+    apply_actor_action_gradients,
+    as_simulation_action,
+    collect_simulation_action_gradients,
+)
+from genesis_drones.envs.track_diff_env import TrackDiffEnv, TrackDiffEnvConfig, smooth_safety_penalty
 from genesis_drones.evaluation.track_diff import TrackScenarios, evaluate_diff_policy
+
+
+def _ensure_genesis():
+    if not gs._initialized:
+        gs.init(backend=gs.gpu if torch.cuda.is_available() else gs.cpu, logging_level="warning")
+    return gs.device
 
 
 def test_diff_tracking_math_contracts():
@@ -36,6 +53,74 @@ def test_fixed_scenarios_are_reproducible():
     torch.testing.assert_close(first.initial_quaternion, second.initial_quaternion)
     torch.testing.assert_close(first.waypoint_sequences, second.waypoint_sequences)
     assert not torch.equal(first.waypoint_sequences, different.waypoint_sequences)
+
+
+def test_simulation_action_is_a_detached_leaf():
+    observation = torch.zeros((2, 17), requires_grad=True)
+    actor = DeterministicActor(17, 4, NetworkConfig(), hover_action=2.0 / 3.3 - 1.0)
+    action_actor = actor(observation)
+    action_sim = as_simulation_action(action_actor)
+    assert action_actor.grad_fn is not None
+    assert action_sim.is_leaf
+    assert action_sim.requires_grad
+    assert action_sim.grad_fn is None
+    torch.testing.assert_close(action_sim, action_actor.detach())
+
+
+def test_apg_bridges_action_gradients_across_windows():
+    device = _ensure_genesis()
+    agent = ApgAgent(17, 4, 3.3, NetworkConfig(), ApgConfig(horizon=2), device)
+    environment = TrackDiffEnv(TrackDiffEnvConfig(horizon=2), 2, requires_grad=True)
+    observation = environment.reset()
+    actor_actions = []
+    sim_actions = []
+    physics_loss = observation.new_zeros(())
+    for _ in range(2):
+        actor_observation = observation.detach()
+        assert actor_observation.grad_fn is None
+        action_actor = agent.actor(actor_observation)
+        action_sim = as_simulation_action(action_actor)
+        observation, (step_physics_loss, _, _), _, _ = environment.step(action_sim)
+        physics_loss = physics_loss + step_physics_loss.sum()
+        actor_actions.append(action_actor)
+        sim_actions.append(action_sim)
+
+    for parameter in agent.actor.parameters():
+        assert parameter.grad is None
+    scaled_physics_loss = physics_loss / 4.0
+    environment.scene.backward(scaled_physics_loss)
+    for action_sim in sim_actions:
+        assert action_sim.grad is not None
+        assert torch.isfinite(action_sim.grad).all()
+        assert action_sim.grad.abs().sum() > 0
+    for parameter in agent.actor.parameters():
+        assert parameter.grad is None
+    action_gradients = collect_simulation_action_gradients(sim_actions)
+    for action_sim in sim_actions:
+        action_sim.grad = None
+    environment.release_simulation_graphs(scaled_physics_loss)
+    apply_actor_action_gradients(
+        actor_actions,
+        action_gradients,
+        physics_loss.new_zeros(()),
+    )
+    actor_grad_norm = torch.zeros((), device=device)
+    for parameter in agent.actor.parameters():
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        actor_grad_norm = actor_grad_norm + parameter.grad.detach().square().sum()
+    assert actor_grad_norm > 0
+
+    observation = environment.reset()
+    normalizer = RunningNormalizer(17).to(device)
+    observation, stats = agent.update(environment, observation, normalizer)
+    assert environment.episode_step == 2
+    assert torch.isfinite(torch.tensor(stats.actor_loss))
+    assert torch.isfinite(torch.tensor(stats.actor_grad_norm))
+    observation, stats = agent.update(environment, observation, normalizer)
+    assert environment.episode_step == 4
+    assert torch.isfinite(observation).all()
+    assert environment.is_alive.any()
 
 
 def test_evaluation_releases_scene_state_cache():
