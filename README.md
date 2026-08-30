@@ -84,10 +84,15 @@ python scripts/eval/track_diff_benchmark.py --algo apg --num-envs 1024
 python scripts/eval/track_diff_benchmark.py --algo shac --num-envs 1024
 ```
 
-Train Adaptive Policy Gradient (APG) or Short-Horizon Actor-Critic (SHAC):
+Train Adaptive Policy Gradient (APG) or Short-Horizon Actor-Critic (SHAC). Default length is 300 updates:
 ```bash
-python scripts/train/track_diff_train.py --algo apg
-python scripts/train/track_diff_train.py --algo shac
+python scripts/train/track_diff_train.py --algo apg --updates 300
+python scripts/train/track_diff_train.py --algo shac --updates 300
+```
+
+Plot PPO, APG, and SHAC train reward and loss against wall-clock time:
+```bash
+python scripts/eval/plot_track_diff_convergence.py
 ```
 
 Compare the best APG and SHAC checkpoints with the existing PPO policy on the shared test scenarios:

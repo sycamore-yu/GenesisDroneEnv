@@ -7,9 +7,12 @@ import torch
 
 import genesis as gs
 
-from genesis_drones.algorithms.diff_rl import ApgAgent, RunningNormalizer, ShacAgent
 from genesis_drones.envs.track_diff_env import TrackDiffEnv
-from genesis_drones.utils.track_diff_config import load_track_diff_settings
+from genesis_drones.utils.track_diff_config import (
+    load_track_diff_settings,
+    make_track_diff_agent,
+    make_track_diff_normalizer,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -49,11 +52,8 @@ def main() -> None:
     settings = load_track_diff_settings(args.config)
     gs.init(backend=gs.gpu, seed=settings.seed, logging_level="warning")
     torch.cuda.reset_peak_memory_stats()
-    if args.algo == "apg":
-        agent = ApgAgent(17, 4, 3.3, settings.network, settings.apg, gs.device)
-    else:
-        agent = ShacAgent(17, 4, 3.3, settings.network, settings.shac, gs.device)
-    normalizer = RunningNormalizer(17).to(gs.device)
+    agent = make_track_diff_agent(args.algo, settings, gs.device)
+    normalizer = make_track_diff_normalizer(gs.device)
     environment = TrackDiffEnv(settings.environment, args.num_envs, requires_grad=True)
     observation = environment.reset()
     if args.validation_scenarios > 0:

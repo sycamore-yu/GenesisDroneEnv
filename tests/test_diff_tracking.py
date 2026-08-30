@@ -13,7 +13,7 @@ from genesis_drones.algorithms.diff_rl import (
     collect_simulation_action_gradients,
 )
 from genesis_drones.envs.track_diff_env import TrackDiffEnv, TrackDiffEnvConfig, smooth_safety_penalty
-from genesis_drones.evaluation.track_diff import TrackScenarios, evaluate_diff_policy
+from genesis_drones.evaluation.track_diff import TrackScenarios, classify_eval_step, evaluate_diff_policy
 
 
 def _ensure_genesis():
@@ -38,10 +38,11 @@ def test_diff_tracking_math_contracts():
     normalized = normalizer(torch.tensor([[2.0, 3.0]]))
     torch.testing.assert_close(normalized, torch.zeros_like(normalized), atol=2e-4, rtol=0.0)
 
-    actor = DeterministicActor(17, 4, NetworkConfig(), hover_action=2.0 / 3.3 - 1.0)
-    action = actor(torch.zeros((1, 17)))
-    torch.testing.assert_close(action[:, 0], torch.tensor([2.0 / 3.3 - 1.0]))
-    torch.testing.assert_close(action[:, 1:], torch.zeros((1, 3)))
+    hover_action = 2.0 / 3.3 - 1.0
+    actor = DeterministicActor(TrackDiffEnv.observation_dim, 4, NetworkConfig(), hover_action=hover_action)
+    action = actor(torch.zeros((1, TrackDiffEnv.observation_dim)))
+    torch.testing.assert_close(action[:, 3], torch.tensor([hover_action]))
+    torch.testing.assert_close(action[:, :3], torch.zeros((1, 3)))
 
 
 def test_fixed_scenarios_are_reproducible():
@@ -56,8 +57,8 @@ def test_fixed_scenarios_are_reproducible():
 
 
 def test_simulation_action_is_a_detached_leaf():
-    observation = torch.zeros((2, 17), requires_grad=True)
-    actor = DeterministicActor(17, 4, NetworkConfig(), hover_action=2.0 / 3.3 - 1.0)
+    observation = torch.zeros((2, TrackDiffEnv.observation_dim), requires_grad=True)
+    actor = DeterministicActor(TrackDiffEnv.observation_dim, 4, NetworkConfig(), hover_action=2.0 / 3.3 - 1.0)
     action_actor = actor(observation)
     action_sim = as_simulation_action(action_actor)
     assert action_actor.grad_fn is not None
@@ -69,7 +70,7 @@ def test_simulation_action_is_a_detached_leaf():
 
 def test_apg_bridges_action_gradients_across_windows():
     device = _ensure_genesis()
-    agent = ApgAgent(17, 4, 3.3, NetworkConfig(), ApgConfig(horizon=2), device)
+    agent = ApgAgent(TrackDiffEnv.observation_dim, 4, 3.3, NetworkConfig(), ApgConfig(horizon=2), device)
     environment = TrackDiffEnv(TrackDiffEnvConfig(horizon=2), 2, requires_grad=True)
     observation = environment.reset()
     actor_actions = []
@@ -112,7 +113,7 @@ def test_apg_bridges_action_gradients_across_windows():
     assert actor_grad_norm > 0
 
     observation = environment.reset()
-    normalizer = RunningNormalizer(17).to(device)
+    normalizer = RunningNormalizer(TrackDiffEnv.observation_dim).to(device)
     observation, stats = agent.update(environment, observation, normalizer)
     assert environment.episode_step == 2
     assert torch.isfinite(torch.tensor(stats.actor_loss))
@@ -121,6 +122,34 @@ def test_apg_bridges_action_gradients_across_windows():
     assert environment.episode_step == 4
     assert torch.isfinite(observation).all()
     assert environment.is_alive.any()
+
+
+def test_eval_step_does_not_count_z_error_as_crash():
+    is_alive = torch.tensor([True, True, True, True])
+    position = torch.tensor(
+        [
+            [0.0, 0.0, 0.6],
+            [0.0, 0.0, 0.05],
+            [6.0, 0.0, 0.6],
+            [0.0, 0.0, 2.0],
+        ]
+    )
+    target = torch.tensor(
+        [
+            [0.0, 0.0, 0.6],
+            [0.0, 0.0, 0.6],
+            [0.0, 0.0, 0.6],
+            [0.0, 0.0, 0.6],
+        ]
+    )
+    has_nan = torch.tensor([False, False, False, False])
+    arrived, crashed, _, hit_ground, left_workspace = classify_eval_step(
+        is_alive, position, target, has_nan, target_threshold=0.1, ground_height=0.1, horizontal_limit=5.0
+    )
+    torch.testing.assert_close(arrived, torch.tensor([True, False, False, False]))
+    torch.testing.assert_close(crashed, torch.tensor([False, True, True, False]))
+    torch.testing.assert_close(hit_ground, torch.tensor([False, True, False, False]))
+    torch.testing.assert_close(left_workspace, torch.tensor([False, False, True, False]))
 
 
 def test_evaluation_releases_scene_state_cache():
@@ -138,10 +167,10 @@ def test_evaluation_releases_scene_state_cache():
             self.metric = torch.tensor([2.0])
 
         def reset(self, *_args):
-            return torch.zeros((1, 17))
+            return torch.zeros((1, TrackDiffEnv.observation_dim))
 
         def step(self, _action):
-            return torch.zeros((1, 17)), None, None, None
+            return torch.zeros((1, TrackDiffEnv.observation_dim)), None, None, None
 
         def episode_metrics(self):
             return {"waypoint_count": self.metric}
@@ -161,3 +190,55 @@ def test_evaluation_releases_scene_state_cache():
 
     assert environment.scene.reset_calls == 1
     torch.testing.assert_close(metrics["waypoint_count"], torch.tensor([2.0]))
+
+
+def test_track_diff_env_visualize_shows_plane_and_waypoint():
+    _ensure_genesis()
+    environment = TrackDiffEnv(TrackDiffEnvConfig(horizon=2), 1, requires_grad=False, visualize=True)
+    try:
+        morphs = [type(entity.morph).__name__ for entity in environment.scene.entities]
+        assert "Plane" in morphs
+        assert "Mesh" in morphs
+        assert "Drone" in morphs
+        environment.reset()
+        torch.testing.assert_close(environment.target_visual.get_pos(), environment.target_position)
+    finally:
+        environment.scene.reset()
+
+
+def test_pid_hover_and_ppo_style_arrival_reward():
+    _ensure_genesis()
+    environment = TrackDiffEnv(TrackDiffEnvConfig(horizon=1), 1, requires_grad=False)
+    try:
+        hover = 2.0 / environment.config.thrust_to_weight_ratio - 1.0
+        observation = environment.reset(
+            torch.tensor([[0.0, 0.0, 0.6]]),
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.tensor([[[0.0, 0.0, 0.6], [0.4, 0.0, 0.8]]]),
+        )
+        assert observation.shape[-1] == TrackDiffEnv.observation_dim
+        hover_action = torch.tensor([[0.0, 0.0, 0.0, hover]], device=environment.device)
+        motor_thrust, wrench = environment.mix_action(hover_action)
+        hover_thrust = environment.config.max_collective_thrust / environment.config.thrust_to_weight_ratio
+        torch.testing.assert_close(wrench[0, 0], wrench.new_tensor(hover_thrust), atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(wrench[0, 1:], torch.zeros(3, device=wrench.device), atol=1e-3, rtol=0.0)
+        environment.reset(
+            torch.tensor([[0.0, 0.0, 0.6]]),
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.tensor([[[0.0, 0.0, 0.6], [0.4, 0.0, 0.8]]]),
+        )
+        _, (_, _, reward), _, extras = environment.step(hover_action)
+        assert bool(extras["arrived"][0])
+        arrival_bonus = 20.0 * environment.config.reward_scales.target * environment.config.dt
+        assert float(reward[0]) > 0.5 * arrival_bonus
+        roll_action = hover_action.clone()
+        roll_action[0, 0] = 0.4
+        environment.reset(
+            torch.tensor([[0.0, 0.0, 0.6]]),
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.tensor([[[0.0, 0.0, 0.8]]]),
+        )
+        rolled_thrust, _ = environment.mix_action(roll_action)
+        assert rolled_thrust[0].max() - rolled_thrust[0].min() > 1e-4
+    finally:
+        environment.scene.reset()

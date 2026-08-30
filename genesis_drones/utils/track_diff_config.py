@@ -3,8 +3,15 @@ from pathlib import Path
 
 import yaml
 
-from genesis_drones.algorithms.diff_rl import ApgConfig, NetworkConfig, ShacConfig
-from genesis_drones.envs.track_diff_env import LossWeights, TrackDiffEnvConfig
+from genesis_drones.algorithms.diff_rl import (
+    ApgAgent,
+    ApgConfig,
+    NetworkConfig,
+    RunningNormalizer,
+    ShacAgent,
+    ShacConfig,
+)
+from genesis_drones.envs.track_diff_env import RewardScales, TrackDiffEnv, TrackDiffEnvConfig
 
 
 @dataclass(frozen=True)
@@ -35,6 +42,8 @@ def build_track_diff_settings(data: dict, project_root: Path) -> TrackDiffSettin
         flight_config = yaml.safe_load(file)
 
     environment_data = data["environment"]
+    angle = flight_config["ang"]
+    reward_data = data.get("reward_scales", task_config["reward_scales"])
     environment = TrackDiffEnvConfig(
         dt=genesis_config["dt"],
         horizon=environment_data["horizon"],
@@ -44,6 +53,11 @@ def build_track_diff_settings(data: dict, project_root: Path) -> TrackDiffSettin
         motor_arm=environment_data["motor_arm"],
         thrust_coefficient=flight_config["kf"],
         moment_coefficient=environment_data["moment_coefficient"],
+        thrust_to_weight_ratio=flight_config["TWR"],
+        base_rpm=flight_config["base_rpm"],
+        angle_kp=(angle["kp_r"], angle["kp_p"], angle["kp_y"]),
+        angle_ki=(angle["ki_r"], angle["ki_p"], angle["ki_y"]),
+        angle_kd=(angle["kd_r"], angle["kd_p"], angle["kd_y"]),
         body_collision_radius=environment_data["body_collision_radius"],
         body_collision_half_height=environment_data["body_collision_half_height"],
         ground_termination_height=task_config["termination_if_close_to_ground"],
@@ -53,14 +67,24 @@ def build_track_diff_settings(data: dict, project_root: Path) -> TrackDiffSettin
         vertical_termination_error=task_config["termination_if_z_greater_than"],
         vertical_warning_distance=environment_data["vertical_warning_distance"],
         safety_temperature_ratio=environment_data["safety_temperature_ratio"],
+        yaw_lambda=task_config["yaw_lambda"],
+        max_horizon_vel=task_config["max_horizon_vel"],
+        max_vertical_vel=task_config["max_vertical_vel"],
+        action_delta_weight=data.get("action_delta_weight", 0.0),
         initial_x_range=tuple(genesis_config["init_x_range"]),
         initial_y_range=tuple(genesis_config["init_y_range"]),
         initial_z_range=tuple(genesis_config["init_z_range"]),
         target_x_range=tuple(task_config["command_cfg"]["pos_x_range"]),
         target_y_range=tuple(task_config["command_cfg"]["pos_y_range"]),
         target_z_range=tuple(task_config["command_cfg"]["pos_z_range"]),
-        loss_weights=LossWeights(**data["loss_weights"]),
-        reward_weights=LossWeights(**data["reward_weights"]),
+        reward_scales=RewardScales(
+            target=reward_data["target"],
+            smooth=reward_data["smooth"],
+            yaw=reward_data["yaw"],
+            angular=reward_data["angular"],
+            crash=reward_data["crash"],
+            velocity=reward_data.get("velocity", 0.0),
+        ),
     )
     return TrackDiffSettings(
         raw=data,
@@ -85,3 +109,15 @@ def load_track_diff_settings(path: Path) -> TrackDiffSettings:
     with path.open() as file:
         data = yaml.safe_load(file)
     return build_track_diff_settings(data, path.resolve().parents[2])
+
+
+def make_track_diff_agent(algorithm: str, settings: TrackDiffSettings, device):
+    observation_size = TrackDiffEnv.observation_dim
+    ratio = settings.environment.thrust_to_weight_ratio
+    if algorithm == "apg":
+        return ApgAgent(observation_size, TrackDiffEnv.action_dim, ratio, settings.network, settings.apg, device)
+    return ShacAgent(observation_size, TrackDiffEnv.action_dim, ratio, settings.network, settings.shac, device)
+
+
+def make_track_diff_normalizer(device) -> RunningNormalizer:
+    return RunningNormalizer(TrackDiffEnv.observation_dim).to(device)

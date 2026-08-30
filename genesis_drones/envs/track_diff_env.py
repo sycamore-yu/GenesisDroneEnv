@@ -12,15 +12,13 @@ ASSETS_PATH = Path(__file__).resolve().parents[1] / "robots" / "assets"
 
 
 @dataclass(frozen=True)
-class LossWeights:
-    position: float = 3.0
-    velocity: float = 1.0
-    tilt: float = 0.1
-    yaw: float = 0.1
-    angular_velocity: float = 0.001
-    action_delta: float = 0.001
-    safety: float = 5.0
-    terminal: float = 10.0
+class RewardScales:
+    target: float = 10.0
+    smooth: float = -1.0e-4
+    yaw: float = 0.01
+    angular: float = -2.0e-4
+    crash: float = -10.0
+    velocity: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -33,6 +31,11 @@ class TrackDiffEnvConfig:
     motor_arm: float = 0.1
     thrust_coefficient: float = 3.16e-10
     moment_coefficient: float = 7.94e-12
+    thrust_to_weight_ratio: float = 3.3
+    base_rpm: float = 62293.9641914
+    angle_kp: tuple[float, float, float] = (0.04, 0.04, 0.04)
+    angle_ki: tuple[float, float, float] = (0.004, 0.004, 0.004)
+    angle_kd: tuple[float, float, float] = (0.0001, 0.0001, 0.0001)
     body_collision_radius: float = 0.06
     body_collision_half_height: float = 0.0125
     ground_termination_height: float = 0.1
@@ -42,14 +45,17 @@ class TrackDiffEnvConfig:
     vertical_termination_error: float = 1.2
     vertical_warning_distance: float = 0.12
     safety_temperature_ratio: float = 0.1
+    yaw_lambda: float = -10.0
+    max_horizon_vel: float = 1.5
+    max_vertical_vel: float = 0.5
+    action_delta_weight: float = 0.0
     initial_x_range: tuple[float, float] = (-0.05, 0.05)
     initial_y_range: tuple[float, float] = (-0.05, 0.05)
     initial_z_range: tuple[float, float] = (0.6, 0.61)
     target_x_range: tuple[float, float] = (-1.2, 1.2)
     target_y_range: tuple[float, float] = (-1.2, 1.2)
     target_z_range: tuple[float, float] = (0.6, 1.0)
-    loss_weights: LossWeights = LossWeights()
-    reward_weights: LossWeights = LossWeights(terminal=0.0)
+    reward_scales: RewardScales = RewardScales()
 
 
 class DroneState(NamedTuple):
@@ -63,6 +69,29 @@ def smooth_safety_penalty(distance: torch.Tensor, warning_distance: float, tempe
     temperature = warning_distance * temperature_ratio
     normalizer = F.softplus(distance.new_tensor(warning_distance / temperature))
     return torch.square(F.softplus((warning_distance - distance) / temperature) / normalizer)
+
+
+def quaternion_to_roll_pitch_yaw(quaternion: torch.Tensor) -> torch.Tensor:
+    w = quaternion[:, 0]
+    x = quaternion[:, 1]
+    y = quaternion[:, 2]
+    z = quaternion[:, 3]
+    sine_pitch = w * y - x * z
+    sine_roll_cosine_pitch = w * x + y * z
+    sine_yaw_cosine_pitch = w * z + x * y
+    cosine_roll_cosine_pitch = 0.5 * (w * w - x * x - y * y + z * z)
+    cosine_yaw_cosine_pitch = 0.5 * (w * w + x * x - y * y - z * z)
+    cosine_pitch = torch.sqrt(
+        cosine_yaw_cosine_pitch * cosine_yaw_cosine_pitch + sine_yaw_cosine_pitch * sine_yaw_cosine_pitch
+    )
+    return torch.stack(
+        (
+            torch.atan2(sine_roll_cosine_pitch, cosine_roll_cosine_pitch),
+            torch.atan2(sine_pitch, cosine_pitch),
+            torch.atan2(sine_yaw_cosine_pitch, cosine_yaw_cosine_pitch),
+        ),
+        dim=-1,
+    )
 
 
 def detached_torch_tensor(value: torch.Tensor) -> torch.Tensor:
@@ -86,13 +115,21 @@ def _detach_cached_torch_tensor(value) -> None:
 
 class TrackDiffEnv:
     action_dim = 4
-    observation_dim = 17
+    observation_dim = 23
 
-    def __init__(self, config: TrackDiffEnvConfig, num_envs: int, requires_grad: bool = True):
+    def __init__(
+        self,
+        config: TrackDiffEnvConfig,
+        num_envs: int,
+        requires_grad: bool = True,
+        show_viewer: bool = False,
+        visualize: bool | None = None,
+    ):
         self.config = config
         self.num_envs = num_envs
         self.requires_grad = requires_grad
         self.device = gs.device
+        self.visualize = show_viewer if visualize is None else visualize
 
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(
@@ -101,12 +138,18 @@ class TrackDiffEnv:
                 substeps_local=config.horizon if requires_grad else 1,
                 requires_grad=requires_grad,
             ),
+            viewer_options=gs.options.ViewerOptions(
+                camera_pos=(-3.0, 0.0, 3.0),
+                camera_lookat=(0.0, 0.0, 1.0),
+                camera_fov=40,
+            ),
             rigid_options=gs.options.RigidOptions(
                 enable_collision=False,
                 enable_joint_limit=True,
             ),
-            show_viewer=False,
+            show_viewer=show_viewer,
         )
+        self.plane = self.scene.add_entity(gs.morphs.Plane()) if self.visualize else None
         self.drone = self.scene.add_entity(
             morph=gs.morphs.Drone(
                 file=str(ASSETS_PATH / "drone_urdf" / "drone.urdf"),
@@ -115,6 +158,20 @@ class TrackDiffEnv:
                 default_armature=2.6e-7,
             ),
         )
+        if self.visualize:
+            self.target_visual = self.scene.add_entity(
+                morph=gs.morphs.Mesh(
+                    file=str(ASSETS_PATH / "primitives" / "sphere.obj"),
+                    scale=0.05,
+                    fixed=False,
+                    collision=False,
+                ),
+                surface=gs.surfaces.Rough(
+                    diffuse_texture=gs.textures.ColorTexture(color=(1.0, 0.5, 0.5)),
+                ),
+            )
+        else:
+            self.target_visual = None
         self.scene.build(n_envs=num_envs)
         self.drone.set_dofs_damping([0.0, 0.0, 0.0, 1e-4, 1e-4, 1e-4])
 
@@ -129,17 +186,9 @@ class TrackDiffEnv:
             device=self.device,
             dtype=gs.tc_float,
         )
-        self.allocation_inverse = torch.linalg.inv(self.allocation)
-        self.motor_max_thrust = config.max_collective_thrust / 4.0
-        self.torque_scale = torch.tensor(
-            [
-                config.motor_arm * config.max_collective_thrust / 2.0,
-                config.motor_arm * config.max_collective_thrust / 2.0,
-                motor_moment_ratio * config.max_collective_thrust / 2.0,
-            ],
-            device=self.device,
-            dtype=gs.tc_float,
-        )
+        self.angle_kp = torch.tensor(config.angle_kp, device=self.device, dtype=gs.tc_float)
+        self.angle_ki = torch.tensor(config.angle_ki, device=self.device, dtype=gs.tc_float)
+        self.angle_kd = torch.tensor(config.angle_kd, device=self.device, dtype=gs.tc_float)
         self.envs_idx = torch.arange(num_envs, device=self.device)
         self.target_lower = torch.tensor(
             [config.target_x_range[0], config.target_y_range[0], config.target_z_range[0]],
@@ -154,6 +203,8 @@ class TrackDiffEnv:
 
         self.target_position = torch.zeros((num_envs, 3), device=self.device, dtype=gs.tc_float)
         self.last_action = torch.zeros((num_envs, self.action_dim), device=self.device, dtype=gs.tc_float)
+        self.pid_integral = torch.zeros((num_envs, 3), device=self.device, dtype=gs.tc_float)
+        self.last_angular_velocity = torch.zeros((num_envs, 3), device=self.device, dtype=gs.tc_float)
         self.is_alive = torch.ones(num_envs, device=self.device, dtype=torch.bool)
         self.waypoint_sequences = None
         self.waypoint_index = torch.zeros(num_envs, device=self.device, dtype=torch.int64)
@@ -168,6 +219,7 @@ class TrackDiffEnv:
         self.position_error_sum = torch.zeros(num_envs, device=self.device, dtype=gs.tc_float)
         self.position_error_steps = torch.zeros(num_envs, device=self.device, dtype=gs.tc_float)
         self._simulation_forces: list[torch.Tensor] = []
+        self.end_on_vertical_error = True
 
     def _read_state(self) -> DroneState:
         solver_state = self.scene.rigid_solver.get_state()
@@ -197,36 +249,29 @@ class TrackDiffEnv:
         self._simulation_forces.clear()
         _detach_cached_torch_tensor(self.scene.rigid_solver.dyn_state.dofs.ctrl_force)
         self.last_action = detached_torch_tensor(self.last_action)
+        self.pid_integral = detached_torch_tensor(self.pid_integral)
+        self.last_angular_velocity = detached_torch_tensor(self.last_angular_velocity)
 
     def _make_observation(self, state: DroneState) -> torch.Tensor:
-        quaternion = torch.where(state.quaternion[:, :1] < 0.0, -state.quaternion, state.quaternion)
-        w = quaternion[:, 0]
-        x = quaternion[:, 1]
-        y = quaternion[:, 2]
-        z = quaternion[:, 3]
-        cosine_yaw = 1.0 - 2.0 * (y * y + z * z)
-        sine_yaw = 2.0 * (w * z + x * y)
         position_error = self.target_position - state.position
-        position_local = torch.stack(
-            (
-                cosine_yaw * position_error[:, 0] + sine_yaw * position_error[:, 1],
-                -sine_yaw * position_error[:, 0] + cosine_yaw * position_error[:, 1],
-                position_error[:, 2],
-            ),
-            dim=-1,
-        )
-        velocity_local = torch.stack(
-            (
-                cosine_yaw * state.linear_velocity[:, 0] + sine_yaw * state.linear_velocity[:, 1],
-                -sine_yaw * state.linear_velocity[:, 0] + cosine_yaw * state.linear_velocity[:, 1],
-                state.linear_velocity[:, 2],
-            ),
-            dim=-1,
-        )
         observation = torch.cat(
-            (position_local, quaternion, velocity_local, state.angular_velocity_body, self.last_action), dim=-1
+            (
+                state.position,
+                self.target_position,
+                position_error,
+                state.quaternion,
+                state.linear_velocity,
+                state.angular_velocity_body,
+                self.last_action,
+            ),
+            dim=-1,
         )
         return torch.where(self.is_alive[:, None], observation, torch.zeros_like(observation))
+
+    def _sync_target_visual(self) -> None:
+        if self.target_visual is None:
+            return
+        self.target_visual.set_pos(self.target_position, zero_velocity=True)
 
     def reset(
         self,
@@ -254,6 +299,8 @@ class TrackDiffEnv:
         self.drone.set_pos(initial_position, zero_velocity=True)
         self.drone.set_quat(initial_quaternion, zero_velocity=True)
         self.last_action = torch.zeros_like(self.last_action)
+        self.pid_integral = torch.zeros_like(self.pid_integral)
+        self.last_angular_velocity = torch.zeros_like(self.last_angular_velocity)
         self.is_alive.fill_(True)
         self.episode_step = 0
         self.waypoint_index.zero_()
@@ -274,13 +321,40 @@ class TrackDiffEnv:
             self.waypoint_sequences = waypoint_sequences.to(device=self.device, dtype=gs.tc_float)
             self.target_position = self.waypoint_sequences[:, 0]
 
+        self._sync_target_visual()
         return self._make_observation(self._read_state()).detach()
 
-    def mix_action(self, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def mix_action(self, action: torch.Tensor, state: DroneState | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         action = action.clamp(-1.0, 1.0)
-        collective_thrust = 0.5 * (action[:, :1] + 1.0) * self.config.max_collective_thrust
-        desired_wrench = torch.cat((collective_thrust, action[:, 1:] * self.torque_scale), dim=-1)
-        motor_thrust = torch.clamp(desired_wrench @ self.allocation_inverse.T, 0.0, self.motor_max_thrust)
+        if state is None:
+            state = self._read_state()
+        body_euler = quaternion_to_roll_pitch_yaw(state.quaternion)
+        body_setpoint = -body_euler + action[:, :3]
+        angle_error = body_setpoint * 15.0 - state.angular_velocity_body
+        proportional = angle_error * self.angle_kp
+        integral = torch.clamp(self.pid_integral + angle_error * self.angle_ki * self.config.dt, -0.5, 0.5)
+        derivative = torch.clamp(
+            (self.last_angular_velocity - state.angular_velocity_body) * self.angle_kd / self.config.dt,
+            -0.5,
+            0.5,
+        )
+        pid_output = proportional + integral + derivative
+        self.pid_integral = torch.where(self.is_alive[:, None], integral, torch.zeros_like(integral))
+        self.last_angular_velocity = torch.where(
+            self.is_alive[:, None], state.angular_velocity_body, torch.zeros_like(state.angular_velocity_body)
+        )
+        throttle = (action[:, 3] + 1.0) * 0.5
+        motor_command = torch.stack(
+            (
+                throttle - pid_output[:, 0] - pid_output[:, 1] - pid_output[:, 2],
+                throttle - pid_output[:, 0] + pid_output[:, 1] + pid_output[:, 2],
+                throttle + pid_output[:, 0] + pid_output[:, 1] - pid_output[:, 2],
+                throttle + pid_output[:, 0] - pid_output[:, 1] + pid_output[:, 2],
+            ),
+            dim=-1,
+        ).clamp(0.0, 1.0)
+        motor_rpm = torch.sqrt((motor_command * self.config.thrust_to_weight_ratio).clamp_min(1e-12)) * self.config.base_rpm
+        motor_thrust = self.config.thrust_coefficient * motor_rpm * motor_rpm
         return motor_thrust, motor_thrust @ self.allocation.T
 
 
@@ -288,7 +362,7 @@ class TrackDiffEnv:
         action = action.clamp(-1.0, 1.0)
         is_alive_before = self.is_alive.clone()
         state_before = self._read_state()
-        motor_thrust, actual_wrench = self.mix_action(action)
+        motor_thrust, actual_wrench = self.mix_action(action, state_before)
         actual_wrench = actual_wrench * is_alive_before[:, None]
         w_before = state_before.quaternion[:, 0]
         x_before = state_before.quaternion[:, 1]
@@ -315,60 +389,26 @@ class TrackDiffEnv:
 
         state = self._read_state()
         quaternion = state.quaternion
-        w = quaternion[:, 0]
-        x = quaternion[:, 1]
-        y = quaternion[:, 2]
-        z = quaternion[:, 3]
         position_error = self.target_position - state.position
+        last_position_error = self.target_position - state_before.position
         distance = torch.linalg.vector_norm(position_error, dim=-1)
-        closeness = torch.exp(-distance)
-        position_loss = 1.0 - closeness
-        velocity_loss = F.smooth_l1_loss(
-            torch.linalg.vector_norm(state.linear_velocity, dim=-1),
-            torch.zeros(self.num_envs, device=self.device, dtype=gs.tc_float),
-            reduction="none",
+        body_euler = quaternion_to_roll_pitch_yaw(quaternion)
+        angular_acceleration = (state.angular_velocity_body - self.last_angular_velocity) / self.config.dt
+        horizon_speed = torch.linalg.vector_norm(state.linear_velocity[:, :2], dim=-1)
+        vertical_speed = state.linear_velocity[:, 2].abs()
+        target_reward = -torch.sum(torch.square(position_error), dim=-1) * 0.1
+        target_reward = target_reward + torch.sum(last_position_error.abs() - position_error.abs(), dim=-1)
+        smooth_reward = torch.linalg.vector_norm(action[:, :3] - self.last_action[:, :3], dim=-1)
+        smooth_reward = smooth_reward + (action[:, 3] - self.last_action[:, 3]).abs() * 5.0
+        yaw_reward = torch.exp(self.config.yaw_lambda * body_euler[:, 2].abs()) - 1.0
+        angular_reward = torch.sum(angular_acceleration.abs(), dim=-1)
+        velocity_reward = -F.relu(horizon_speed - self.config.max_horizon_vel) - F.relu(
+            vertical_speed - self.config.max_vertical_vel
         )
-        rotation_zz = 1.0 - 2.0 * (x * x + y * y)
-        tilt_loss = closeness * (1.0 - rotation_zz)
-        rotation_xx = 1.0 - 2.0 * (y * y + z * z)
-        rotation_yx = 2.0 * (x * y + w * z)
-        yaw_cosine = rotation_xx / torch.sqrt(rotation_xx * rotation_xx + rotation_yx * rotation_yx + 1e-8)
-        yaw_loss = closeness * (1.0 - yaw_cosine)
-        angular_velocity_loss = torch.linalg.vector_norm(state.angular_velocity_body, dim=-1)
-        action_delta_loss = torch.sum(torch.square(action - self.last_action), dim=-1)
 
-        rotation_zx = 2.0 * (x * z - w * y)
-        rotation_zy = 2.0 * (y * z + w * x)
-        lowest_height = (
-            state.position[:, 2]
-            - self.config.body_collision_radius
-            * torch.sqrt(rotation_zx * rotation_zx + rotation_zy * rotation_zy + 1e-8)
-            - self.config.body_collision_half_height * rotation_zz.abs()
-        )
-        ground_safety_loss = smooth_safety_penalty(
-            lowest_height, self.config.ground_warning_distance, self.config.safety_temperature_ratio
-        )
         horizontal_distance_x = self.config.horizontal_termination_error - position_error[:, 0].abs()
         horizontal_distance_y = self.config.horizontal_termination_error - position_error[:, 1].abs()
         vertical_distance = self.config.vertical_termination_error - position_error[:, 2].abs()
-        safety_loss = (
-            ground_safety_loss
-            + smooth_safety_penalty(
-                horizontal_distance_x,
-                self.config.horizontal_warning_distance,
-                self.config.safety_temperature_ratio,
-            )
-            + smooth_safety_penalty(
-                horizontal_distance_y,
-                self.config.horizontal_warning_distance,
-                self.config.safety_temperature_ratio,
-            )
-            + smooth_safety_penalty(
-                vertical_distance,
-                self.config.vertical_warning_distance,
-                self.config.safety_temperature_ratio,
-            )
-        )
 
         has_finite_state = (
             torch.isfinite(state.position).all(dim=-1)
@@ -380,35 +420,30 @@ class TrackDiffEnv:
             (state.position[:, 2] < self.config.ground_termination_height)
             | (horizontal_distance_x < 0.0)
             | (horizontal_distance_y < 0.0)
-            | (vertical_distance < 0.0)
             | ~has_finite_state
         )
+        if self.end_on_vertical_error:
+            is_crashed = is_crashed | (vertical_distance < 0.0)
         is_newly_dead = is_alive_before & is_crashed
         is_arrived = is_alive_before & ~is_newly_dead & (distance < self.config.target_threshold)
+        target_reward = target_reward + 20.0 * is_arrived.to(dtype=target_reward.dtype)
+        crash_reward = is_newly_dead.to(dtype=target_reward.dtype)
 
-        loss_weights = self.config.loss_weights
-        physics_loss = (
-            loss_weights.position * position_loss
-            + loss_weights.velocity * velocity_loss
-            + loss_weights.tilt * tilt_loss
-            + loss_weights.yaw * yaw_loss
-            + loss_weights.angular_velocity * angular_velocity_loss
-            + loss_weights.safety * safety_loss
+        scales = self.config.reward_scales
+        step_scale = self.config.dt
+        reward = (
+            scales.target * target_reward
+            + scales.smooth * smooth_reward
+            + scales.yaw * yaw_reward
+            + scales.angular * angular_reward
+            + scales.crash * crash_reward
+            + scales.velocity * velocity_reward
+        ) * step_scale
+        reward = torch.where(is_alive_before, reward, torch.zeros_like(reward))
+        physics_loss = -reward
+        policy_loss = (self.config.action_delta_weight * torch.sum(torch.square(action - self.last_action), dim=-1)) * (
+            is_alive_before
         )
-        physics_loss = physics_loss * is_alive_before + loss_weights.terminal * is_newly_dead
-        policy_loss = (loss_weights.action_delta * action_delta_loss) * is_alive_before
-
-        reward_weights = self.config.reward_weights
-        reward_penalty = (
-            reward_weights.position * position_loss
-            + reward_weights.velocity * velocity_loss
-            + reward_weights.tilt * tilt_loss
-            + reward_weights.yaw * yaw_loss
-            + reward_weights.angular_velocity * angular_velocity_loss
-            + reward_weights.action_delta * action_delta_loss
-            + reward_weights.safety * safety_loss
-        )
-        reward = ((1.0 - reward_penalty) * is_alive_before).detach()
 
         self.episode_step += 1
         self.waypoint_count += is_arrived
@@ -436,6 +471,7 @@ class TrackDiffEnv:
             )
             self.target_position = self.waypoint_sequences[self.envs_idx, self.waypoint_index]
 
+        self._sync_target_visual()
         self.last_action = torch.where(self.is_alive[:, None], action, torch.zeros_like(action))
         is_time_limit = self.episode_step == self.config.max_episode_steps
         is_truncated = self.is_alive & is_time_limit
@@ -451,14 +487,12 @@ class TrackDiffEnv:
             "actual_wrench": actual_wrench.detach(),
             "motor_thrust": motor_thrust.detach(),
             "loss_components": {
-                "position": (position_loss * is_alive_before).detach(),
-                "velocity": (velocity_loss * is_alive_before).detach(),
-                "tilt": (tilt_loss * is_alive_before).detach(),
-                "yaw": (yaw_loss * is_alive_before).detach(),
-                "angular_velocity": (angular_velocity_loss * is_alive_before).detach(),
-                "action_delta": (action_delta_loss * is_alive_before).detach(),
-                "safety": (safety_loss * is_alive_before).detach(),
-                "terminal": is_newly_dead.detach(),
+                "target": (target_reward * is_alive_before).detach(),
+                "smooth": (smooth_reward * is_alive_before).detach(),
+                "yaw": (yaw_reward * is_alive_before).detach(),
+                "angular": (angular_reward * is_alive_before).detach(),
+                "velocity": (velocity_reward * is_alive_before).detach(),
+                "crash": crash_reward.detach(),
             },
             "metrics": {
                 "position_error": (distance * is_alive_before).detach(),
@@ -475,6 +509,8 @@ class TrackDiffEnv:
             "dofs_velocity": detached_torch_tensor(dofs_velocity),
             "target_position": detached_torch_tensor(self.target_position),
             "last_action": detached_torch_tensor(self.last_action),
+            "pid_integral": detached_torch_tensor(self.pid_integral),
+            "last_angular_velocity": detached_torch_tensor(self.last_angular_velocity),
             "is_alive": detached_torch_tensor(self.is_alive),
             "waypoint_sequences": (
                 None if self.waypoint_sequences is None else detached_torch_tensor(self.waypoint_sequences)
@@ -495,6 +531,10 @@ class TrackDiffEnv:
         self.drone.set_dofs_velocity(state["dofs_velocity"].to(self.device))
         self.target_position = state["target_position"].to(self.device)
         self.last_action = state["last_action"].to(self.device)
+        self.pid_integral = state.get("pid_integral", torch.zeros_like(self.pid_integral)).to(self.device)
+        self.last_angular_velocity = state.get(
+            "last_angular_velocity", torch.zeros_like(self.last_angular_velocity)
+        ).to(self.device)
         self.is_alive = state["is_alive"].to(self.device)
         self.waypoint_sequences = (
             None if state["waypoint_sequences"] is None else state["waypoint_sequences"].to(self.device)
@@ -512,6 +552,8 @@ class TrackDiffEnv:
         self.release_simulation_graphs()
         self.target_position = detached_torch_tensor(self.target_position)
         self.last_action = detached_torch_tensor(self.last_action)
+        self.pid_integral = detached_torch_tensor(self.pid_integral)
+        self.last_angular_velocity = detached_torch_tensor(self.last_angular_velocity)
         self.is_alive = detached_torch_tensor(self.is_alive)
         if self.waypoint_sequences is not None:
             self.waypoint_sequences = detached_torch_tensor(self.waypoint_sequences)

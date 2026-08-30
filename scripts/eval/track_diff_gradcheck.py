@@ -83,8 +83,8 @@ def parameter_gradient(module: torch.nn.Module) -> torch.Tensor:
 
 def compare_bridge_and_end_to_end(environment: TrackDiffEnv, scenarios: TrackScenarios, steps: int) -> dict:
     hover_action = 2.0 / 3.3 - 1.0
-    actor_end_to_end = DeterministicActor(17, 4, NetworkConfig(), hover_action).to(gs.device)
-    actor_bridge = DeterministicActor(17, 4, NetworkConfig(), hover_action).to(gs.device)
+    actor_end_to_end = DeterministicActor(TrackDiffEnv.observation_dim, 4, NetworkConfig(), hover_action).to(gs.device)
+    actor_bridge = DeterministicActor(TrackDiffEnv.observation_dim, 4, NetworkConfig(), hover_action).to(gs.device)
     actor_bridge.load_state_dict(actor_end_to_end.state_dict())
 
     observation = environment.reset(
@@ -123,7 +123,7 @@ def compare_bridge_and_end_to_end(environment: TrackDiffEnv, scenarios: TrackSce
             action_actor,
             previous_action,
             is_alive_before,
-            environment.config.loss_weights.action_delta,
+            environment.config.action_delta_weight,
         ) / environment.num_envs
         previous_action = action_actor
         actor_actions.append(action_actor)
@@ -162,7 +162,7 @@ def main() -> None:
     hover_action = 2.0 / 3.3 - 1.0
     action_parameters = torch.nn.Parameter(torch.zeros((32, 1, 4), device=gs.device))
     with torch.no_grad():
-        action_parameters[:, :, 0] = torch.atanh(action_parameters.new_tensor(hover_action))
+        action_parameters[:, :, 3] = torch.atanh(action_parameters.new_tensor(hover_action))
     action_optimizer = torch.optim.Adam((action_parameters,), lr=0.03)
 
     single_config = replace(settings.environment, horizon=1)
@@ -170,7 +170,12 @@ def main() -> None:
     single_fd_environment = TrackDiffEnv(single_config, 1, requires_grad=False)
     single_scenarios = fixed_scenarios(1)
 
-    mixer_action = torch.tensor([[hover_action, 0.0, 0.0, 0.0]], device=gs.device)
+    single_analytical_environment.reset(
+        single_scenarios.initial_position,
+        single_scenarios.initial_quaternion,
+        single_scenarios.waypoint_sequences,
+    )
+    mixer_action = torch.tensor([[0.0, 0.0, 0.0, hover_action]], device=gs.device)
     motor_thrust, actual_wrench = single_analytical_environment.mix_action(mixer_action)
     hover_thrust = settings.environment.max_collective_thrust / 3.3
     torch.testing.assert_close(motor_thrust, torch.full_like(motor_thrust, hover_thrust / 4.0))
@@ -191,7 +196,7 @@ def main() -> None:
         saturated_motor_thrust @ single_analytical_environment.allocation.T,
     )
 
-    single_actions = torch.tensor([[[hover_action, 0.03, -0.02, 0.01]]], device=gs.device)
+    single_actions = torch.tensor([[[0.03, -0.02, 0.01, hover_action]]], device=gs.device)
     single_inputs = [gs.from_torch(single_actions[0], requires_grad=True)]
     single_physics_loss, single_policy_loss = rollout_loss(
         single_analytical_environment, single_inputs, single_scenarios
@@ -216,10 +221,10 @@ def main() -> None:
     multi_fd_environment = TrackDiffEnv(multi_config, 1, requires_grad=False)
     multi_scenarios = fixed_scenarios(10)
     multi_actions = torch.zeros((10, 1, 4), device=gs.device)
-    multi_actions[:, :, 0] = hover_action
-    multi_actions[:, :, 1] = 0.02
-    multi_actions[:, :, 2] = -0.015
-    multi_actions[:, :, 3] = 0.01
+    multi_actions[:, :, 0] = 0.02
+    multi_actions[:, :, 1] = -0.015
+    multi_actions[:, :, 2] = 0.01
+    multi_actions[:, :, 3] = hover_action
     multi_inputs = [gs.from_torch(action, requires_grad=True) for action in multi_actions]
     multi_physics_loss, multi_policy_loss = rollout_loss(multi_analytical_environment, multi_inputs, multi_scenarios)
     multi_analytical_environment.backward(multi_physics_loss, multi_policy_loss)

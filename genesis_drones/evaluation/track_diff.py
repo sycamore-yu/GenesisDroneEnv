@@ -77,12 +77,39 @@ class EvaluationSummary:
         return asdict(self)
 
 
+def classify_eval_step(
+    is_alive: torch.Tensor,
+    position: torch.Tensor,
+    target: torch.Tensor,
+    has_nan: torch.Tensor,
+    target_threshold: float,
+    ground_height: float,
+    horizontal_limit: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """One-life scoring: arrive if close; die only on ground, NaN, or XY workspace exit.
+
+    |z error| is not a crash. PPO training resets on that; the viewer teleports, so it
+    looks like the drone kept flying.
+    """
+    position_error = target - position
+    distance = torch.linalg.vector_norm(position_error, dim=-1)
+    hit_ground = position[:, 2] < ground_height
+    left_workspace = (position_error[:, 0].abs() > horizontal_limit) | (
+        position_error[:, 1].abs() > horizontal_limit
+    )
+    is_crashed = is_alive & (hit_ground | left_workspace | has_nan)
+    is_arrived = is_alive & ~is_crashed & (distance < target_threshold)
+    return is_arrived, is_crashed, distance, hit_ground, left_workspace
+
+
 def evaluate_diff_policy(
     environment: TrackDiffEnv,
     agent: ApgAgent | ShacAgent,
     normalizer: RunningNormalizer,
     scenarios: TrackScenarios,
 ) -> dict[str, torch.Tensor]:
+    previous_vertical_rule = getattr(environment, "end_on_vertical_error", True)
+    environment.end_on_vertical_error = False
     observation = environment.reset(
         scenarios.initial_position,
         scenarios.initial_quaternion,
@@ -95,6 +122,7 @@ def evaluate_diff_policy(
                 observation, _, _, _ = environment.step(action)
         return {name: value.detach().clone() for name, value in environment.episode_metrics().items()}
     finally:
+        environment.end_on_vertical_error = previous_vertical_rule
         # RigidSolver.get_state() caches every queried state, including in non-differentiable scenes.
         # Reset the scene after evaluation so the 1500-step validation cache does not stay resident between runs.
         environment.scene.reset()

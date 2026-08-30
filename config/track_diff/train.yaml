@@ -1,5 +1,5 @@
 seed: 1
-updates: 1000
+updates: 400
 save_interval: 100
 log_root: logs/track_diff
 validation_scenarios: 256
@@ -9,6 +9,7 @@ test_seed: 20250829
 num_envs:
   apg: 1024
   shac: 1024
+action_delta_weight: 0.0
 
 network:
   hidden_sizes: [256, 128]
@@ -24,25 +25,13 @@ environment:
   motor_arm: 0.1
   moment_coefficient: 7.94e-12
 
-loss_weights:
-  position: 3.0
-  velocity: 1.0
-  tilt: 0.1
-  yaw: 0.1
-  angular_velocity: 0.001
-  action_delta: 0.001
-  safety: 5.0
-  terminal: 10.0
-
-reward_weights:
-  position: 3.0
-  velocity: 1.0
-  tilt: 0.1
-  yaw: 0.1
-  angular_velocity: 0.001
-  action_delta: 0.001
-  safety: 5.0
-  terminal: 0.0
+reward_scales:
+  target: 10.0
+  smooth: -0.0001
+  yaw: 0.01
+  angular: -0.0002
+  crash: -10.0
+  velocity: 0.0
 
 apg:
   horizon: 32
@@ -52,13 +41,14 @@ apg:
 shac:
   horizon: 32
   actor_learning_rate: 0.001
-  critic_learning_rate: 0.003
+  critic_learning_rate: 0.001
   gamma: 0.99
   td_lambda: 0.95
-  entropy_weight: 0.01
+  entropy_weight: 0.0
   actor_max_grad_norm: 1.0
   critic_max_grad_norm: 1.0
   critic_minibatches: 8
+  critic_iterations: 1
   target_update_rate: 0.005
   log_standard_deviation_min: -5.0
-  log_standard_deviation_max: 2.0
+  log_standard_deviation_max: -1.0

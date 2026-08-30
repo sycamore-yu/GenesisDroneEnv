@@ -33,13 +33,14 @@ class ShacConfig:
     critic_learning_rate: float = 3e-3
     gamma: float = 0.99
     td_lambda: float = 0.95
-    entropy_weight: float = 0.01
+    entropy_weight: float = 0.0
     actor_max_grad_norm: float = 1.0
     critic_max_grad_norm: float = 1.0
     critic_minibatches: int = 8
+    critic_iterations: int = 1
     target_update_rate: float = 0.005
     log_standard_deviation_min: float = -5.0
-    log_standard_deviation_max: float = 2.0
+    log_standard_deviation_max: float = -1.0
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,8 @@ def actor_action_delta_loss(
     weight: float,
     discount: torch.Tensor | None = None,
 ) -> torch.Tensor:
+    if weight == 0.0:
+        return action_actor.new_zeros(())
     per_environment = weight * torch.sum(torch.square(action_actor - previous_action), dim=-1) * is_alive
     if discount is not None:
         per_environment = per_environment * discount
@@ -179,7 +182,7 @@ class DeterministicActor(nn.Module):
         super().__init__()
         self.network = MultilayerPerceptron(observation_size, action_size, config)
         with torch.no_grad():
-            self.network.output.bias[0] = torch.atanh(torch.tensor(hover_action))
+            self.network.output.bias[3] = torch.atanh(torch.tensor(hover_action))
 
     def forward(self, observation: torch.Tensor) -> torch.Tensor:
         return torch.tanh(self.network(observation))
@@ -198,7 +201,7 @@ class StochasticActor(nn.Module):
         super().__init__()
         self.mean_network = MultilayerPerceptron(observation_size, action_size, config)
         with torch.no_grad():
-            self.mean_network.output.bias[0] = torch.atanh(torch.tensor(hover_action))
+            self.mean_network.output.bias[3] = torch.atanh(torch.tensor(hover_action))
         self.log_standard_deviation = nn.Parameter(torch.zeros(action_size))
         self.log_standard_deviation_min = log_standard_deviation_min
         self.log_standard_deviation_max = log_standard_deviation_max
@@ -239,7 +242,7 @@ class ApgAgent:
     ):
         hover_action = 2.0 / thrust_to_weight_ratio - 1.0
         self.actor = DeterministicActor(observation_size, action_size, network_config, hover_action).to(device)
-        self.optimizer = torch.optim.Adam(self.actor.parameters(), lr=config.learning_rate)
+        self.optimizer = torch.optim.Adam(self.actor.parameters(), lr=config.learning_rate, betas=(0.7, 0.95))
         self.config = config
 
     def action(
@@ -272,7 +275,7 @@ class ApgAgent:
                 action_actor,
                 previous_action,
                 is_alive_before,
-                environment.config.loss_weights.action_delta,
+                environment.config.action_delta_weight,
             )
             previous_action = action_actor
             reward_sum = reward_sum + reward.sum()
@@ -335,8 +338,12 @@ class ShacAgent:
         self.critic = Critic(observation_size, network_config).to(device)
         self.target_critic = deepcopy(self.critic)
         self.target_critic.requires_grad_(False)
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=config.actor_learning_rate)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=config.critic_learning_rate)
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(), lr=config.actor_learning_rate, betas=(0.7, 0.95)
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(), lr=config.critic_learning_rate, betas=(0.7, 0.95)
+        )
         self.config = config
 
     def action(
@@ -353,7 +360,6 @@ class ShacAgent:
     ) -> tuple[torch.Tensor, UpdateStats]:
         steps = self.config.horizon
         tracked = environment.is_alive.clone()
-        discount = tracked.to(dtype=observation.dtype)
         physics_actor_loss = observation.new_zeros(())
         policy_actor_loss = observation.new_zeros(())
         entropy_sum = observation.new_zeros(())
@@ -367,34 +373,28 @@ class ShacAgent:
             is_alive_before = environment.is_alive.clone()
             normalizer.update(observation, is_alive_before)
             normalized_observation = normalizer(observation.detach())
-            action_actor, entropy = self.actor.sample(normalized_observation)
+            if self.config.entropy_weight == 0.0:
+                action_actor = self.actor.deterministic(normalized_observation)
+                entropy = observation.new_zeros(observation.shape[0])
+            else:
+                action_actor, entropy = self.actor.sample(normalized_observation)
             action_sim = as_simulation_action(action_actor)
             with torch.no_grad():
                 value = self.critic(normalized_observation.detach())
             next_observation, (physics_loss, policy_loss, reward), done, extras = environment.step(action_sim)
-            normalized_next_observation = normalizer(next_observation)
-            if environment.episode_step == environment.config.max_episode_steps:
-                next_value_for_actor = self.target_critic(normalized_next_observation)
-                physics_actor_loss = physics_actor_loss + (
-                    discount * self.config.gamma * next_value_for_actor * extras["truncated"]
-                ).sum()
-                next_value = next_value_for_actor.detach()
-            else:
-                with torch.no_grad():
-                    next_value = self.target_critic(normalized_next_observation.detach())
+            with torch.no_grad():
+                next_value = self.target_critic(normalizer(next_observation).detach()).clamp(-20.0, 20.0)
 
-            physics_actor_loss = physics_actor_loss + (discount * physics_loss).sum()
+            physics_actor_loss = physics_actor_loss + physics_loss.sum()
             policy_actor_loss = policy_actor_loss + actor_action_delta_loss(
                 action_actor,
                 previous_action,
                 is_alive_before,
-                environment.config.loss_weights.action_delta,
-                discount,
+                environment.config.action_delta_weight,
             )
             previous_action = action_actor
             entropy_sum = entropy_sum + (entropy * is_alive_before).sum()
             reward_sum = reward_sum + reward.sum()
-            discount = discount * self.config.gamma * extras["alive"]
             rollout.observations.append(normalized_observation.detach())
             rollout.losses.append((physics_loss + policy_loss).detach())
             rollout.values.append(value)
@@ -406,9 +406,6 @@ class ShacAgent:
             sim_actions.append(action_sim)
             observation = next_observation
 
-        physics_actor_loss = physics_actor_loss + (
-            discount * self.target_critic(normalizer(observation))
-        ).sum()
         denominator = tracked.sum().clamp_min(1) * steps
         physics_actor_loss = physics_actor_loss / denominator
         entropy = entropy_sum / denominator
@@ -444,23 +441,24 @@ class ShacAgent:
 
         observations = torch.stack(rollout.observations)[valid]
         target_values = target_values[valid]
-        permutation = torch.randperm(observations.shape[0], device=environment.device)
         critic_loss_sum = 0.0
         critic_grad_norm_sum = 0.0
         critic_updates = 0
-        for indices in torch.chunk(permutation, self.config.critic_minibatches):
-            if indices.shape[0] == 0:
-                continue
-            critic_loss = F.mse_loss(self.critic(observations[indices]), target_values[indices])
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-            critic_grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.critic.parameters(), self.config.critic_max_grad_norm
-            )
-            self.critic_optimizer.step()
-            critic_loss_sum += critic_loss.detach().item()
-            critic_grad_norm_sum += critic_grad_norm.item()
-            critic_updates += 1
+        for _ in range(self.config.critic_iterations):
+            permutation = torch.randperm(observations.shape[0], device=environment.device)
+            for indices in torch.chunk(permutation, self.config.critic_minibatches):
+                if indices.shape[0] == 0:
+                    continue
+                critic_loss = F.smooth_l1_loss(self.critic(observations[indices]), target_values[indices])
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.critic.parameters(), self.config.critic_max_grad_norm
+                )
+                self.critic_optimizer.step()
+                critic_loss_sum += critic_loss.detach().item()
+                critic_grad_norm_sum += critic_grad_norm.item()
+                critic_updates += 1
 
         with torch.no_grad():
             for parameter, target_parameter in zip(self.critic.parameters(), self.target_critic.parameters()):
