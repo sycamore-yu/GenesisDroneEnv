@@ -146,24 +146,78 @@ def evaluate_ppo(
     left_workspace_any = torch.zeros(num_scenarios, device=gs.device, dtype=torch.bool)
     vertical_band_any = torch.zeros(num_scenarios, device=gs.device, dtype=torch.bool)
     max_waypoint_index = task.waypoint_sequences.shape[1] - 1
+    dt = environment_config["dt"]
+    max_steps = task_config["max_episode_length"]
+    previous_position = genesis_environment.drone.odom.world_pos.detach().clone()
+    segment_start_position = previous_position.clone()
+    previous_action = torch.zeros((num_scenarios, 4), device=gs.device)
+    path_length = torch.zeros(num_scenarios, device=gs.device)
+    segment_path_length = torch.zeros(num_scenarios, device=gs.device)
+    completed_path_length = torch.zeros(num_scenarios, device=gs.device)
+    straight_line_distance = torch.zeros(num_scenarios, device=gs.device)
+    completed_segments = torch.zeros(num_scenarios, device=gs.device)
+    inter_waypoint_time_sum = torch.zeros(num_scenarios, device=gs.device)
+    segment_start_step = torch.zeros(num_scenarios, device=gs.device, dtype=torch.int64)
+    action_total_variation = torch.zeros(num_scenarios, device=gs.device)
+    speed_sum = torch.zeros(num_scenarios, device=gs.device)
+    closing_sum = torch.zeros(num_scenarios, device=gs.device)
+    alive_steps = torch.zeros(num_scenarios, device=gs.device)
+    max_speed = torch.zeros(num_scenarios, device=gs.device)
+    speed_history = torch.zeros((num_scenarios, max_steps), device=gs.device)
+    closing_history = torch.zeros((num_scenarios, max_steps), device=gs.device)
+    history_mask = torch.zeros((num_scenarios, max_steps), device=gs.device, dtype=torch.bool)
 
     with torch.no_grad():
-        for step in range(1, task_config["max_episode_length"] + 1):
+        for step in range(1, max_steps + 1):
             is_alive_before = is_alive.clone()
+            target_before = task.command_buf.detach().clone()
             action = policy(observation)
             action = torch.where(is_alive_before[:, None], action, torch.zeros_like(action))
             observation, _, _, _ = task.step(action)
             position = genesis_environment.drone.odom.world_pos
+            velocity = genesis_environment.drone.odom.world_linear_vel
             is_arrived, is_crashed, distance, hit_ground, left_workspace = classify_eval_step(
                 is_alive_before,
                 position,
-                task.command_buf,
+                target_before,
                 genesis_environment.drone.odom.has_nan,
                 task_config["target_thr"],
                 task_config["termination_if_close_to_ground"],
                 task_config["termination_if_x_greater_than"],
             )
-            z_error = (position[:, 2] - task.command_buf[:, 2]).abs()
+            step_distance = torch.linalg.vector_norm(position - previous_position, dim=-1)
+            path_length = path_length + step_distance * is_alive_before
+            segment_path_length = segment_path_length + step_distance * is_alive_before
+            speed = torch.linalg.vector_norm(velocity, dim=-1)
+            goal_vector = target_before - previous_position
+            goal_distance = torch.linalg.vector_norm(goal_vector, dim=-1).clamp_min(1e-6)
+            closing = (velocity * goal_vector).sum(dim=-1) / goal_distance
+            speed_sum = speed_sum + speed * is_alive_before
+            closing_sum = closing_sum + closing * is_alive_before
+            alive_steps = alive_steps + is_alive_before.to(dtype=alive_steps.dtype)
+            max_speed = torch.maximum(max_speed, speed * is_alive_before)
+            speed_history[:, step - 1] = speed
+            closing_history[:, step - 1] = closing
+            history_mask[:, step - 1] = is_alive_before
+            action_total_variation = (
+                action_total_variation
+                + torch.linalg.vector_norm(action - previous_action, dim=-1) * is_alive_before
+            )
+            if is_arrived.any():
+                segment_straight = torch.linalg.vector_norm(target_before - segment_start_position, dim=-1)
+                segment_time = (step - segment_start_step).to(dtype=inter_waypoint_time_sum.dtype) * dt
+                straight_line_distance = straight_line_distance + segment_straight * is_arrived
+                completed_path_length = completed_path_length + segment_path_length * is_arrived
+                inter_waypoint_time_sum = inter_waypoint_time_sum + segment_time * is_arrived
+                completed_segments = completed_segments + is_arrived.to(dtype=completed_segments.dtype)
+                segment_path_length = torch.where(
+                    is_arrived, torch.zeros_like(segment_path_length), segment_path_length
+                )
+                segment_start_position = torch.where(is_arrived[:, None], position, segment_start_position)
+                segment_start_step = torch.where(
+                    is_arrived, torch.full_like(segment_start_step, step), segment_start_step
+                )
+            z_error = (position[:, 2] - target_before[:, 2]).abs()
             vertical_band_any = vertical_band_any | (
                 is_alive_before & (z_error > task_config["termination_if_z_greater_than"])
             )
@@ -177,7 +231,7 @@ def evaluate_ppo(
             )
             task.command_buf[:] = task.waypoint_sequences[envs_idx, task.waypoint_index]
             first_arrival_step = torch.where(
-                is_arrived & (first_arrival_step == task_config["max_episode_length"]),
+                is_arrived & (first_arrival_step == max_steps),
                 torch.full_like(first_arrival_step, step),
                 first_arrival_step,
             )
@@ -185,25 +239,52 @@ def evaluate_ppo(
             position_error_sum += distance * is_alive_before
             position_error_steps += is_alive_before
             is_alive = is_alive_before & ~is_crashed
+            previous_position = position.detach().clone()
+            previous_action = action.detach()
             task._update_obs()
             observation = task.get_observations()
 
-    max_episode_steps = task_config["max_episode_length"]
     survival_steps = torch.where(
-        crash_step <= max_episode_steps,
+        crash_step <= max_steps,
         crash_step,
-        torch.full_like(crash_step, max_episode_steps),
+        torch.full_like(crash_step, max_steps),
     )
+    safe_alive = alive_steps.clamp_min(1.0)
+    safe_segments = completed_segments.clamp_min(1.0)
+    path_efficiency = straight_line_distance / (completed_path_length + 1e-6)
+    excess_path_ratio = completed_path_length / (straight_line_distance + 1e-6)
+    no_segment = completed_segments == 0
+    path_efficiency = torch.where(no_segment, torch.ones_like(path_efficiency), path_efficiency)
+    excess_path_ratio = torch.where(no_segment, torch.ones_like(excess_path_ratio), excess_path_ratio)
+    p95_speed = torch.zeros(num_scenarios, device=gs.device)
+    p95_closing = torch.zeros(num_scenarios, device=gs.device)
+    for env_index in range(num_scenarios):
+        mask = history_mask[env_index]
+        if mask.any():
+            p95_speed[env_index] = torch.quantile(speed_history[env_index, mask].float(), 0.95)
+            p95_closing[env_index] = torch.quantile(closing_history[env_index, mask].float(), 0.95)
     return {
         "first_arrived": waypoint_count > 0,
         "waypoint_count": waypoint_count,
-        "first_arrival_time": first_arrival_step * environment_config["dt"],
-        "crashed": crash_step <= max_episode_steps,
-        "survival_time": survival_steps * environment_config["dt"],
+        "first_arrival_time": first_arrival_step * dt,
+        "crashed": crash_step <= max_steps,
+        "survival_time": survival_steps * dt,
         "mean_position_error": position_error_sum / position_error_steps.clamp_min(1.0),
         "hit_ground": hit_ground_any,
         "left_workspace": left_workspace_any,
         "vertical_band_violation": vertical_band_any,
+        "mean_inter_waypoint_time": inter_waypoint_time_sum / safe_segments,
+        "mean_speed": speed_sum / safe_alive,
+        "p95_speed": p95_speed,
+        "max_speed": max_speed,
+        "mean_closing_velocity": closing_sum / safe_alive,
+        "p95_closing_velocity": p95_closing,
+        "path_length": path_length,
+        "straight_line_distance": straight_line_distance,
+        "path_efficiency": path_efficiency,
+        "excess_path_ratio": excess_path_ratio,
+        "action_total_variation": action_total_variation,
+        "completed_segments": completed_segments,
     }
 
 

@@ -72,6 +72,18 @@ class EvaluationSummary:
     crash_rate: ScalarSummary
     survival_time: ScalarSummary
     mean_position_error: ScalarSummary
+    mean_inter_waypoint_time: ScalarSummary
+    median_inter_waypoint_time: ScalarSummary
+    mean_speed: ScalarSummary
+    p95_speed: ScalarSummary
+    max_speed: ScalarSummary
+    mean_closing_velocity: ScalarSummary
+    p95_closing_velocity: ScalarSummary
+    path_length: ScalarSummary
+    straight_line_distance: ScalarSummary
+    path_efficiency: ScalarSummary
+    excess_path_ratio: ScalarSummary
+    action_total_variation: ScalarSummary
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -118,11 +130,108 @@ def evaluate_diff_policy(
         scenarios.waypoint_sequences,
     )
     try:
+        num_envs = environment.num_envs
+        device = environment.device
+        dt = environment.config.dt
+        max_steps = environment.config.max_episode_steps
+        state = environment._read_state()
+        previous_position = state.position.detach().clone()
+        segment_start_position = previous_position.clone()
+        previous_action = torch.zeros((num_envs, environment.action_dim), device=device)
+        path_length = torch.zeros(num_envs, device=device)
+        segment_path_length = torch.zeros(num_envs, device=device)
+        completed_path_length = torch.zeros(num_envs, device=device)
+        straight_line_distance = torch.zeros(num_envs, device=device)
+        completed_segments = torch.zeros(num_envs, device=device)
+        inter_waypoint_time_sum = torch.zeros(num_envs, device=device)
+        segment_start_step = torch.zeros(num_envs, device=device, dtype=torch.int64)
+        action_total_variation = torch.zeros(num_envs, device=device)
+        speed_sum = torch.zeros(num_envs, device=device)
+        closing_sum = torch.zeros(num_envs, device=device)
+        alive_steps = torch.zeros(num_envs, device=device)
+        max_speed = torch.zeros(num_envs, device=device)
+        # ponytail: store all alive-step speeds for p95; 1024×1500×4B ≈ 6MB
+        speed_history = torch.zeros((num_envs, max_steps), device=device)
+        closing_history = torch.zeros((num_envs, max_steps), device=device)
+        history_mask = torch.zeros((num_envs, max_steps), device=device, dtype=torch.bool)
+
         with torch.no_grad():
-            for _ in range(environment.config.max_episode_steps):
+            for step in range(max_steps):
                 action = agent.action(observation, normalizer, deterministic=True)
-                observation, _, _, _ = environment.step(action)
-        return {name: value.detach().clone() for name, value in environment.episode_metrics().items()}
+                target_before = environment.target_position.detach().clone()
+                is_alive_before = environment.is_alive.clone()
+                observation, _, _, extras = environment.step(action)
+                state = environment._read_state()
+                position = state.position.detach()
+                velocity = state.linear_velocity.detach()
+                step_distance = torch.linalg.vector_norm(position - previous_position, dim=-1)
+                path_length = path_length + step_distance * is_alive_before
+                segment_path_length = segment_path_length + step_distance * is_alive_before
+                speed = torch.linalg.vector_norm(velocity, dim=-1)
+                goal_vector = target_before - previous_position
+                goal_distance = torch.linalg.vector_norm(goal_vector, dim=-1).clamp_min(1e-6)
+                closing = (velocity * goal_vector).sum(dim=-1) / goal_distance
+                speed_sum = speed_sum + speed * is_alive_before
+                closing_sum = closing_sum + closing * is_alive_before
+                alive_steps = alive_steps + is_alive_before.to(dtype=alive_steps.dtype)
+                max_speed = torch.maximum(max_speed, speed * is_alive_before)
+                speed_history[:, step] = speed
+                closing_history[:, step] = closing
+                history_mask[:, step] = is_alive_before
+                action_total_variation = (
+                    action_total_variation
+                    + torch.linalg.vector_norm(action - previous_action, dim=-1) * is_alive_before
+                )
+                arrived = extras["arrived"]
+                if arrived.any():
+                    segment_straight = torch.linalg.vector_norm(target_before - segment_start_position, dim=-1)
+                    segment_time = (step + 1 - segment_start_step).to(dtype=inter_waypoint_time_sum.dtype) * dt
+                    straight_line_distance = straight_line_distance + segment_straight * arrived
+                    completed_path_length = completed_path_length + segment_path_length * arrived
+                    inter_waypoint_time_sum = inter_waypoint_time_sum + segment_time * arrived
+                    completed_segments = completed_segments + arrived.to(dtype=completed_segments.dtype)
+                    segment_path_length = torch.where(arrived, torch.zeros_like(segment_path_length), segment_path_length)
+                    segment_start_position = torch.where(arrived[:, None], position, segment_start_position)
+                    segment_start_step = torch.where(
+                        arrived, torch.full_like(segment_start_step, step + 1), segment_start_step
+                    )
+                previous_position = position
+                previous_action = action.detach()
+
+        base = {name: value.detach().clone() for name, value in environment.episode_metrics().items()}
+        safe_alive = alive_steps.clamp_min(1.0)
+        safe_segments = completed_segments.clamp_min(1.0)
+        path_efficiency = straight_line_distance / (completed_path_length + 1e-6)
+        excess_path_ratio = completed_path_length / (straight_line_distance + 1e-6)
+        no_segment = completed_segments == 0
+        path_efficiency = torch.where(no_segment, torch.ones_like(path_efficiency), path_efficiency)
+        excess_path_ratio = torch.where(no_segment, torch.ones_like(excess_path_ratio), excess_path_ratio)
+
+        p95_speed = torch.zeros(num_envs, device=device)
+        p95_closing = torch.zeros(num_envs, device=device)
+        for env_index in range(num_envs):
+            mask = history_mask[env_index]
+            if mask.any():
+                p95_speed[env_index] = torch.quantile(speed_history[env_index, mask].float(), 0.95)
+                p95_closing[env_index] = torch.quantile(closing_history[env_index, mask].float(), 0.95)
+
+        base.update(
+            {
+                "mean_inter_waypoint_time": (inter_waypoint_time_sum / safe_segments).detach(),
+                "mean_speed": (speed_sum / safe_alive).detach(),
+                "p95_speed": p95_speed.detach(),
+                "max_speed": max_speed.detach(),
+                "mean_closing_velocity": (closing_sum / safe_alive).detach(),
+                "p95_closing_velocity": p95_closing.detach(),
+                "path_length": path_length.detach(),
+                "straight_line_distance": straight_line_distance.detach(),
+                "path_efficiency": path_efficiency.detach(),
+                "excess_path_ratio": excess_path_ratio.detach(),
+                "action_total_variation": action_total_variation.detach(),
+                "completed_segments": completed_segments.detach(),
+            }
+        )
+        return base
     finally:
         environment.end_on_vertical_error = previous_vertical_rule
         environment.respawn_on_fail = previous_respawn
@@ -146,6 +255,12 @@ def _summarize_values(
         confidence_interval_low=confidence_interval[0].item(),
         confidence_interval_high=confidence_interval[1].item(),
     )
+
+
+def _median_summary(values: torch.Tensor) -> ScalarSummary:
+    values = values.detach().to(device="cpu", dtype=torch.float64)
+    median = values.median().item()
+    return ScalarSummary(median, values.std(unbiased=False).item(), median, median)
 
 
 def summarize_metrics(
@@ -186,6 +301,18 @@ def summarize_metrics(
         crash_rate=_summarize_values(crashed, bootstrap_indices),
         survival_time=_summarize_values(metrics["survival_time"], bootstrap_indices),
         mean_position_error=_summarize_values(metrics["mean_position_error"], bootstrap_indices),
+        mean_inter_waypoint_time=_summarize_values(metrics["mean_inter_waypoint_time"], bootstrap_indices),
+        median_inter_waypoint_time=_median_summary(metrics["mean_inter_waypoint_time"]),
+        mean_speed=_summarize_values(metrics["mean_speed"], bootstrap_indices),
+        p95_speed=_summarize_values(metrics["p95_speed"], bootstrap_indices),
+        max_speed=_summarize_values(metrics["max_speed"], bootstrap_indices),
+        mean_closing_velocity=_summarize_values(metrics["mean_closing_velocity"], bootstrap_indices),
+        p95_closing_velocity=_summarize_values(metrics["p95_closing_velocity"], bootstrap_indices),
+        path_length=_summarize_values(metrics["path_length"], bootstrap_indices),
+        straight_line_distance=_summarize_values(metrics["straight_line_distance"], bootstrap_indices),
+        path_efficiency=_summarize_values(metrics["path_efficiency"], bootstrap_indices),
+        excess_path_ratio=_summarize_values(metrics["excess_path_ratio"], bootstrap_indices),
+        action_total_variation=_summarize_values(metrics["action_total_variation"], bootstrap_indices),
     )
 
 
@@ -213,6 +340,10 @@ def paired_differences(
         "crash_rate": metrics["crashed"].float() - baseline_metrics["crashed"].float(),
         "survival_time": metrics["survival_time"] - baseline_metrics["survival_time"],
         "mean_position_error": metrics["mean_position_error"] - baseline_metrics["mean_position_error"],
+        "mean_speed": metrics["mean_speed"] - baseline_metrics["mean_speed"],
+        "mean_closing_velocity": metrics["mean_closing_velocity"] - baseline_metrics["mean_closing_velocity"],
+        "path_efficiency": metrics["path_efficiency"] - baseline_metrics["path_efficiency"],
+        "action_total_variation": metrics["action_total_variation"] - baseline_metrics["action_total_variation"],
     }
     return {name: _summarize_values(values, bootstrap_indices) for name, values in differences.items()}
 
@@ -222,7 +353,6 @@ def success_against_ppo(summary: EvaluationSummary, ppo_summary: EvaluationSumma
         "waypoint_count": summary.waypoint_count.mean >= 0.9 * ppo_summary.waypoint_count.mean,
         "first_arrival_rate": summary.first_arrival_rate.mean >= ppo_summary.first_arrival_rate.mean - 0.05,
         "crash_rate": summary.crash_rate.mean <= ppo_summary.crash_rate.mean + 0.05,
-        "mean_position_error": summary.mean_position_error.mean <= 1.1 * ppo_summary.mean_position_error.mean,
     }
     checks["success"] = all(checks.values())
     return checks

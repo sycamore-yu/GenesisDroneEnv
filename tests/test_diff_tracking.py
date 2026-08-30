@@ -153,6 +153,13 @@ def test_eval_step_does_not_count_z_error_as_crash():
 
 
 def test_evaluation_releases_scene_state_cache():
+    device = _ensure_genesis()
+
+    class FakeState:
+        def __init__(self):
+            self.position = torch.zeros((1, 3), device=device)
+            self.linear_velocity = torch.zeros((1, 3), device=device)
+
     class FakeScene:
         def __init__(self):
             self.reset_calls = 0
@@ -162,23 +169,46 @@ def test_evaluation_releases_scene_state_cache():
 
     class FakeEnvironment:
         def __init__(self):
-            self.config = type("Config", (), {"max_episode_steps": 3})()
+            self.config = type(
+                "Config",
+                (),
+                {"max_episode_steps": 3, "dt": 0.01, "target_threshold": 0.1},
+            )()
             self.scene = FakeScene()
-            self.metric = torch.tensor([2.0])
+            self.metric = torch.tensor([2.0], device=device)
+            self.num_envs = 1
+            self.device = device
+            self.action_dim = 4
+            self.target_position = torch.zeros((1, 3), device=device)
+            self.is_alive = torch.ones(1, device=device, dtype=torch.bool)
+            self.end_on_vertical_error = True
+            self.respawn_on_fail = True
 
         def reset(self, *_args):
-            return torch.zeros((1, TrackDiffEnv.observation_dim))
+            self.is_alive = torch.ones(1, device=device, dtype=torch.bool)
+            return torch.zeros((1, TrackDiffEnv.observation_dim), device=device)
+
+        def _read_state(self):
+            return FakeState()
 
         def step(self, _action):
-            return torch.zeros((1, TrackDiffEnv.observation_dim)), None, None, None
+            extras = {"arrived": torch.tensor([False], device=device)}
+            return torch.zeros((1, TrackDiffEnv.observation_dim), device=device), None, None, extras
 
         def episode_metrics(self):
-            return {"waypoint_count": self.metric}
+            return {
+                "waypoint_count": self.metric,
+                "first_arrived": torch.tensor([True], device=device),
+                "first_arrival_time": torch.tensor([0.5], device=device),
+                "crashed": torch.tensor([False], device=device),
+                "survival_time": torch.tensor([0.03], device=device),
+                "mean_position_error": torch.tensor([0.1], device=device),
+            }
 
     class FakeAgent:
         def action(self, observation, _normalizer, deterministic=True):
             assert deterministic
-            return torch.zeros((observation.shape[0], 4))
+            return torch.zeros((observation.shape[0], 4), device=observation.device)
 
     environment = FakeEnvironment()
     scenarios = type(
@@ -189,7 +219,10 @@ def test_evaluation_releases_scene_state_cache():
     metrics = evaluate_diff_policy(environment, FakeAgent(), object(), scenarios)
 
     assert environment.scene.reset_calls == 1
-    torch.testing.assert_close(metrics["waypoint_count"], torch.tensor([2.0]))
+    torch.testing.assert_close(metrics["waypoint_count"], torch.tensor([2.0], device=device))
+    assert "mean_speed" in metrics
+    assert "path_efficiency" in metrics
+    assert "action_total_variation" in metrics
 
 
 def test_track_diff_env_visualize_shows_plane_and_waypoint():

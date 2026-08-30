@@ -31,6 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--updates", type=int)
     parser.add_argument("--validation-scenarios", type=int)
+    parser.add_argument("--horizon", type=int, help="override environment/apg/shac horizon together")
+    parser.add_argument(
+        "--no-terminal-value",
+        action="store_true",
+        help="SHAC-old: actor loss without γ^H V(s_H) bootstrap",
+    )
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--log-dir", type=Path)
     return parser.parse_args()
@@ -72,6 +78,15 @@ def save_checkpoint(
 def main() -> None:
     args = parse_args()
     settings = load_track_diff_settings(args.config)
+    if args.horizon is not None or args.no_terminal_value:
+        data = dict(settings.raw)
+        if args.horizon is not None:
+            data["environment"] = {**data["environment"], "horizon": args.horizon}
+            data["apg"] = {**data["apg"], "horizon": args.horizon}
+            data["shac"] = {**data["shac"], "horizon": args.horizon}
+        if args.no_terminal_value:
+            data["shac"] = {**data["shac"], "use_terminal_value": False}
+        settings = build_track_diff_settings(data, PROJECT_ROOT)
     gs.init(backend=gs.gpu, seed=settings.seed, logging_level="warning")
     checkpoint = None
     if args.resume is not None:
@@ -86,8 +101,13 @@ def main() -> None:
     validation_scenario_count = (
         settings.validation_scenarios if args.validation_scenarios is None else args.validation_scenarios
     )
+    horizon = settings.environment.horizon
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_dir = args.log_dir or settings.log_root / f"{args.algo}_{timestamp}"
+    terminal_tag = ""
+    if args.algo == "shac":
+        terminal_tag = "_old" if not settings.shac.use_terminal_value else "_terminal"
+    default_name = f"{args.algo}{terminal_tag}_H{horizon}_{timestamp}"
+    log_dir = args.log_dir or settings.log_root / default_name
     log_dir.mkdir(parents=True, exist_ok=True)
 
     torch.manual_seed(settings.seed)
@@ -141,9 +161,10 @@ def main() -> None:
         best_key = (
             summary.waypoint_count.mean,
             -summary.crash_rate.mean,
-            -summary.mean_position_error.mean,
+            -summary.capped_first_arrival_time.mean,
         )
         validation_history.append({"update": 0, "summary": summary.to_dict()})
+        torch.save(metrics, log_dir / "validation_metrics_0000.pt")
         save_checkpoint(
             log_dir / "checkpoint_0000.pt",
             args.algo,
@@ -172,24 +193,34 @@ def main() -> None:
         writer.add_scalar("train/critic_grad_norm", stats.critic_grad_norm, update)
         writer.add_scalar("train/entropy", stats.entropy, update)
         writer.add_scalar("train/valid_transitions", stats.valid_transitions, update)
+        writer.add_scalar("train/environment_steps", environment_steps, update)
         if update % 10 == 0:
             print(
                 f"update={update} actor_loss={stats.actor_loss:.6f} reward={stats.mean_reward:.6f} "
-                f"critic_loss={stats.critic_loss:.6f} actor_grad={stats.actor_grad_norm:.6f}"
+                f"critic_loss={stats.critic_loss:.6f} actor_grad={stats.actor_grad_norm:.6f}",
+                flush=True,
             )
 
         if update % settings.save_interval == 0 or update == updates:
             metrics = evaluate_diff_policy(validation_environment, agent, normalizer, validation_scenarios)
             summary = summarize_metrics(metrics, settings.environment.max_episode_steps * settings.environment.dt)
+            torch.save(metrics, log_dir / f"validation_metrics_{update:04d}.pt")
             validation_history.append({"update": update, "summary": summary.to_dict()})
             writer.add_scalar("validation/waypoint_count", summary.waypoint_count.mean, update)
             writer.add_scalar("validation/first_arrival_rate", summary.first_arrival_rate.mean, update)
             writer.add_scalar("validation/crash_rate", summary.crash_rate.mean, update)
             writer.add_scalar("validation/mean_position_error", summary.mean_position_error.mean, update)
+            writer.add_scalar("validation/mean_speed", summary.mean_speed.mean, update)
+            writer.add_scalar("validation/mean_closing_velocity", summary.mean_closing_velocity.mean, update)
+            writer.add_scalar("validation/path_efficiency", summary.path_efficiency.mean, update)
+            writer.add_scalar(
+                "validation/capped_first_arrival_time", summary.capped_first_arrival_time.mean, update
+            )
+            writer.add_scalar("validation/action_total_variation", summary.action_total_variation.mean, update)
             candidate_key = (
                 summary.waypoint_count.mean,
                 -summary.crash_rate.mean,
-                -summary.mean_position_error.mean,
+                -summary.capped_first_arrival_time.mean,
             )
             if best_key is None or candidate_key > best_key:
                 best_key = candidate_key
@@ -219,6 +250,10 @@ def main() -> None:
     estimated_peak_memory = non_torch_memory + peak_reserved
     result = {
         "algorithm": args.algo,
+        "horizon": horizon,
+        "use_terminal_value": None if args.algo != "shac" else settings.shac.use_terminal_value,
+        "dt": settings.environment.dt,
+        "gradient_physical_time": horizon * settings.environment.dt,
         "updates": updates,
         "num_envs": num_envs,
         "environment_steps": environment_steps,
@@ -226,6 +261,7 @@ def main() -> None:
         "elapsed_seconds": elapsed_seconds,
         "peak_memory_bytes": estimated_peak_memory,
         "peak_torch_allocated_bytes": torch.cuda.max_memory_allocated(),
+        "peak_torch_reserved_bytes": peak_reserved,
         "validation": validation_history,
     }
     with (log_dir / "training_summary.json").open("w") as file:

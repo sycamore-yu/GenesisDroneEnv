@@ -41,6 +41,7 @@ class ShacConfig:
     target_update_rate: float = 0.005
     log_standard_deviation_min: float = -5.0
     log_standard_deviation_max: float = -1.0
+    use_terminal_value: bool = True
 
 
 @dataclass(frozen=True)
@@ -368,6 +369,7 @@ class ShacAgent:
         sim_actions = []
         previous_action = environment.last_action.detach()
         rollout = ShacRollout([], [], [], [], [], [], [])
+        discount = observation.new_ones(observation.shape[0])
 
         for _ in range(steps):
             is_alive_before = environment.is_alive.clone()
@@ -385,12 +387,13 @@ class ShacAgent:
             with torch.no_grad():
                 next_value = self.target_critic(normalizer(next_observation).detach()).clamp(-20.0, 20.0)
 
-            physics_actor_loss = physics_actor_loss + physics_loss.sum()
+            physics_actor_loss = physics_actor_loss + (physics_loss * discount).sum()
             policy_actor_loss = policy_actor_loss + actor_action_delta_loss(
                 action_actor,
                 previous_action,
                 is_alive_before,
                 environment.config.action_delta_weight,
+                discount=discount,
             )
             previous_action = action_actor
             entropy_sum = entropy_sum + (entropy * is_alive_before).sum()
@@ -405,6 +408,17 @@ class ShacAgent:
             actor_actions.append(action_actor)
             sim_actions.append(action_sim)
             observation = next_observation
+            discount = discount * self.config.gamma
+
+        # Short-horizon SHAC: L_π = Σ γ^t L_t + γ^H V(s_H). Freeze critic weights so the
+        # actor optimizer cannot touch them, but keep ∂V/∂s_H through the observation.
+        if self.config.use_terminal_value:
+            for parameter in self.critic.parameters():
+                parameter.requires_grad_(False)
+            terminal_observation = normalizer(observation)
+            terminal_value = self.critic(terminal_observation)
+            terminal_value = terminal_value * environment.is_alive.to(dtype=terminal_value.dtype)
+            physics_actor_loss = physics_actor_loss + (terminal_value * discount).sum()
 
         denominator = tracked.sum().clamp_min(1) * steps
         physics_actor_loss = physics_actor_loss / denominator
@@ -421,6 +435,9 @@ class ShacAgent:
         apply_actor_action_gradients(actor_actions, action_gradients, policy_actor_loss)
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config.actor_max_grad_norm)
         self.actor_optimizer.step()
+        if self.config.use_terminal_value:
+            for parameter in self.critic.parameters():
+                parameter.requires_grad_(True)
         observation = environment.detach_window()
 
         losses = torch.stack(rollout.losses)
