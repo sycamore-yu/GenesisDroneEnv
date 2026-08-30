@@ -45,10 +45,16 @@ class TrackDiffEnvConfig:
     vertical_termination_error: float = 1.2
     vertical_warning_distance: float = 0.12
     safety_temperature_ratio: float = 0.1
+    roll_termination: float = 180.0
+    pitch_termination: float = 180.0
     yaw_lambda: float = -10.0
     max_horizon_vel: float = 1.5
     max_vertical_vel: float = 0.5
     action_delta_weight: float = 0.0
+    obs_scale_position_error: float = 1.0 / 3.0
+    obs_scale_linear_velocity: float = 1.0 / 3.0
+    obs_scale_angular_velocity: float = 1.0 / 3.14159
+    enable_collision: bool = True
     initial_x_range: tuple[float, float] = (-0.05, 0.05)
     initial_y_range: tuple[float, float] = (-0.05, 0.05)
     initial_z_range: tuple[float, float] = (0.6, 0.61)
@@ -144,12 +150,12 @@ class TrackDiffEnv:
                 camera_fov=40,
             ),
             rigid_options=gs.options.RigidOptions(
-                enable_collision=False,
+                enable_collision=config.enable_collision,
                 enable_joint_limit=True,
             ),
             show_viewer=show_viewer,
         )
-        self.plane = self.scene.add_entity(gs.morphs.Plane()) if self.visualize else None
+        self.plane = self.scene.add_entity(gs.morphs.Plane()) if (self.visualize or config.enable_collision) else None
         self.drone = self.scene.add_entity(
             morph=gs.morphs.Drone(
                 file=str(ASSETS_PATH / "drone_urdf" / "drone.urdf"),
@@ -218,8 +224,11 @@ class TrackDiffEnv:
         )
         self.position_error_sum = torch.zeros(num_envs, device=self.device, dtype=gs.tc_float)
         self.position_error_steps = torch.zeros(num_envs, device=self.device, dtype=gs.tc_float)
+        self.episode_length_buf = torch.zeros(num_envs, device=self.device, dtype=torch.int64)
+        self.body_ang_acc = torch.zeros((num_envs, 3), device=self.device, dtype=gs.tc_float)
         self._simulation_forces: list[torch.Tensor] = []
         self.end_on_vertical_error = True
+        self.respawn_on_fail = True
 
     def _read_state(self) -> DroneState:
         solver_state = self.scene.rigid_solver.get_state()
@@ -253,15 +262,15 @@ class TrackDiffEnv:
         self.last_angular_velocity = detached_torch_tensor(self.last_angular_velocity)
 
     def _make_observation(self, state: DroneState) -> torch.Tensor:
-        position_error = self.target_position - state.position
+        position_error = (self.target_position - state.position) * self.config.obs_scale_position_error
         observation = torch.cat(
             (
                 state.position,
                 self.target_position,
                 position_error,
                 state.quaternion,
-                state.linear_velocity,
-                state.angular_velocity_body,
+                state.linear_velocity * self.config.obs_scale_linear_velocity,
+                state.angular_velocity_body * self.config.obs_scale_angular_velocity,
                 self.last_action,
             ),
             dim=-1,
@@ -301,8 +310,10 @@ class TrackDiffEnv:
         self.last_action = torch.zeros_like(self.last_action)
         self.pid_integral = torch.zeros_like(self.pid_integral)
         self.last_angular_velocity = torch.zeros_like(self.last_angular_velocity)
+        self.body_ang_acc = torch.zeros_like(self.body_ang_acc)
         self.is_alive.fill_(True)
         self.episode_step = 0
+        self.episode_length_buf.zero_()
         self.waypoint_index.zero_()
         self.waypoint_count.zero_()
         self.first_arrival_step.fill_(self.config.max_episode_steps)
@@ -340,9 +351,6 @@ class TrackDiffEnv:
         )
         pid_output = proportional + integral + derivative
         self.pid_integral = torch.where(self.is_alive[:, None], integral, torch.zeros_like(integral))
-        self.last_angular_velocity = torch.where(
-            self.is_alive[:, None], state.angular_velocity_body, torch.zeros_like(state.angular_velocity_body)
-        )
         throttle = (action[:, 3] + 1.0) * 0.5
         motor_command = torch.stack(
             (
@@ -393,18 +401,18 @@ class TrackDiffEnv:
         last_position_error = self.target_position - state_before.position
         distance = torch.linalg.vector_norm(position_error, dim=-1)
         body_euler = quaternion_to_roll_pitch_yaw(quaternion)
-        angular_acceleration = (state.angular_velocity_body - self.last_angular_velocity) / self.config.dt
-        horizon_speed = torch.linalg.vector_norm(state.linear_velocity[:, :2], dim=-1)
-        vertical_speed = state.linear_velocity[:, 2].abs()
+        # Match Odom body_ang_acc: change of body rate over this control step.
+        body_ang_acc = (state.angular_velocity_body - state_before.angular_velocity_body) / self.config.dt
+        self.body_ang_acc = body_ang_acc
+        self.last_angular_velocity = torch.where(
+            is_alive_before[:, None], state.angular_velocity_body, torch.zeros_like(state.angular_velocity_body)
+        )
         target_reward = -torch.sum(torch.square(position_error), dim=-1) * 0.1
         target_reward = target_reward + torch.sum(last_position_error.abs() - position_error.abs(), dim=-1)
         smooth_reward = torch.linalg.vector_norm(action[:, :3] - self.last_action[:, :3], dim=-1)
         smooth_reward = smooth_reward + (action[:, 3] - self.last_action[:, 3]).abs() * 5.0
         yaw_reward = torch.exp(self.config.yaw_lambda * body_euler[:, 2].abs()) - 1.0
-        angular_reward = torch.sum(angular_acceleration.abs(), dim=-1)
-        velocity_reward = -F.relu(horizon_speed - self.config.max_horizon_vel) - F.relu(
-            vertical_speed - self.config.max_vertical_vel
-        )
+        angular_reward = torch.sum(body_ang_acc.abs(), dim=-1)
 
         horizontal_distance_x = self.config.horizontal_termination_error - position_error[:, 0].abs()
         horizontal_distance_y = self.config.horizontal_termination_error - position_error[:, 1].abs()
@@ -418,6 +426,8 @@ class TrackDiffEnv:
         )
         is_crashed = (
             (state.position[:, 2] < self.config.ground_termination_height)
+            | (body_euler[:, 0].abs() > self.config.roll_termination)
+            | (body_euler[:, 1].abs() > self.config.pitch_termination)
             | (horizontal_distance_x < 0.0)
             | (horizontal_distance_y < 0.0)
             | ~has_finite_state
@@ -437,7 +447,6 @@ class TrackDiffEnv:
             + scales.yaw * yaw_reward
             + scales.angular * angular_reward
             + scales.crash * crash_reward
-            + scales.velocity * velocity_reward
         ) * step_scale
         reward = torch.where(is_alive_before, reward, torch.zeros_like(reward))
         physics_loss = -reward
@@ -446,6 +455,7 @@ class TrackDiffEnv:
         )
 
         self.episode_step += 1
+        self.episode_length_buf += is_alive_before.to(dtype=self.episode_length_buf.dtype)
         self.waypoint_count += is_arrived
         self.first_arrival_step = torch.where(
             is_arrived & (self.first_arrival_step == self.config.max_episode_steps),
@@ -473,12 +483,20 @@ class TrackDiffEnv:
 
         self._sync_target_visual()
         self.last_action = torch.where(self.is_alive[:, None], action, torch.zeros_like(action))
-        is_time_limit = self.episode_step == self.config.max_episode_steps
+        is_time_limit = self.episode_length_buf >= self.config.max_episode_steps
         is_truncated = self.is_alive & is_time_limit
         done = is_newly_dead | is_truncated
-        observation = self._make_observation(state)
-        self.is_alive = self.is_alive & ~is_truncated
-        self.last_action = torch.where(self.is_alive[:, None], self.last_action, torch.zeros_like(self.last_action))
+        # Mid-step respawn mutates buffers used by the autograd graph. Only respawn outside
+        # differentiable windows (see detach_window); keep dead masks during BPTT.
+        if self.respawn_on_fail and not self.requires_grad:
+            reset_idx = (is_newly_dead | is_truncated).nonzero(as_tuple=False).flatten()
+            if reset_idx.numel() > 0:
+                self._reset_envs(reset_idx)
+            observation = self._make_observation(self._read_state())
+        else:
+            self.is_alive = self.is_alive & ~is_truncated
+            self.last_action = torch.where(self.is_alive[:, None], self.last_action, torch.zeros_like(self.last_action))
+            observation = self._make_observation(state)
         extras = {
             "terminated": is_newly_dead.detach(),
             "truncated": is_truncated.detach(),
@@ -491,7 +509,6 @@ class TrackDiffEnv:
                 "smooth": (smooth_reward * is_alive_before).detach(),
                 "yaw": (yaw_reward * is_alive_before).detach(),
                 "angular": (angular_reward * is_alive_before).detach(),
-                "velocity": (velocity_reward * is_alive_before).detach(),
                 "crash": crash_reward.detach(),
             },
             "metrics": {
@@ -499,6 +516,40 @@ class TrackDiffEnv:
             },
         }
         return observation, (physics_loss, policy_loss, reward), done.detach(), extras
+
+    def _reset_envs(self, env_idx: torch.Tensor) -> None:
+        count = int(env_idx.numel())
+        if count == 0:
+            return
+        initial_position = torch.empty((count, 3), device=self.device, dtype=gs.tc_float)
+        initial_position[:, 0].uniform_(*self.config.initial_x_range)
+        initial_position[:, 1].uniform_(*self.config.initial_y_range)
+        initial_position[:, 2].uniform_(*self.config.initial_z_range)
+        yaw = torch.empty(count, device=self.device, dtype=gs.tc_float).uniform_(-torch.pi, torch.pi)
+        initial_quaternion = torch.stack(
+            (torch.cos(0.5 * yaw), torch.zeros_like(yaw), torch.zeros_like(yaw), torch.sin(0.5 * yaw)), dim=-1
+        )
+        self.drone.set_pos(initial_position, envs_idx=env_idx, zero_velocity=True)
+        self.drone.set_quat(initial_quaternion, envs_idx=env_idx, zero_velocity=True)
+        self.last_action[env_idx] = 0.0
+        self.pid_integral[env_idx] = 0.0
+        self.last_angular_velocity[env_idx] = 0.0
+        self.body_ang_acc[env_idx] = 0.0
+        self.episode_length_buf[env_idx] = 0
+        self.is_alive[env_idx] = True
+        if self.waypoint_sequences is None:
+            self.target_position[env_idx] = self.target_lower + (self.target_upper - self.target_lower) * torch.rand(
+                (count, 3), device=self.device, dtype=gs.tc_float
+            )
+        else:
+            self.waypoint_index[env_idx] = 0
+            self.target_position[env_idx] = self.waypoint_sequences[env_idx, 0]
+        self.waypoint_count[env_idx] = 0
+        self.first_arrival_step[env_idx] = self.config.max_episode_steps
+        self.crash_step[env_idx] = self.config.max_episode_steps + 1
+        self.position_error_sum[env_idx] = 0.0
+        self.position_error_steps[env_idx] = 0.0
+        self._sync_target_visual()
 
     def state_dict(self) -> dict:
         drone_state = self._read_state()
@@ -517,6 +568,7 @@ class TrackDiffEnv:
             ),
             "waypoint_index": detached_torch_tensor(self.waypoint_index),
             "episode_step": self.episode_step,
+            "episode_length_buf": detached_torch_tensor(self.episode_length_buf),
             "waypoint_count": detached_torch_tensor(self.waypoint_count),
             "first_arrival_step": detached_torch_tensor(self.first_arrival_step),
             "crash_step": detached_torch_tensor(self.crash_step),
@@ -541,6 +593,9 @@ class TrackDiffEnv:
         )
         self.waypoint_index = state["waypoint_index"].to(self.device)
         self.episode_step = state["episode_step"]
+        self.episode_length_buf = state.get(
+            "episode_length_buf", torch.zeros_like(self.episode_length_buf)
+        ).to(self.device)
         self.waypoint_count = state["waypoint_count"].to(self.device)
         self.first_arrival_step = state["first_arrival_step"].to(self.device)
         self.crash_step = state["crash_step"].to(self.device)
@@ -554,7 +609,9 @@ class TrackDiffEnv:
         self.last_action = detached_torch_tensor(self.last_action)
         self.pid_integral = detached_torch_tensor(self.pid_integral)
         self.last_angular_velocity = detached_torch_tensor(self.last_angular_velocity)
+        self.body_ang_acc = detached_torch_tensor(self.body_ang_acc)
         self.is_alive = detached_torch_tensor(self.is_alive)
+        self.episode_length_buf = detached_torch_tensor(self.episode_length_buf)
         if self.waypoint_sequences is not None:
             self.waypoint_sequences = detached_torch_tensor(self.waypoint_sequences)
         self.waypoint_index = detached_torch_tensor(self.waypoint_index)
@@ -563,6 +620,10 @@ class TrackDiffEnv:
         self.crash_step = detached_torch_tensor(self.crash_step)
         self.position_error_sum = detached_torch_tensor(self.position_error_sum)
         self.position_error_steps = detached_torch_tensor(self.position_error_steps)
+        if self.respawn_on_fail:
+            reset_idx = (~self.is_alive).nonzero(as_tuple=False).flatten()
+            if reset_idx.numel() > 0:
+                self._reset_envs(reset_idx)
         return self._make_observation(self._read_state()).detach()
 
     def episode_metrics(self) -> dict[str, torch.Tensor]:

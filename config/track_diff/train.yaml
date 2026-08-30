@@ -16,6 +16,7 @@ network:
 
 environment:
   horizon: 32
+  enable_collision: true
   body_collision_radius: 0.06
   body_collision_half_height: 0.0125
   ground_warning_distance: 0.2

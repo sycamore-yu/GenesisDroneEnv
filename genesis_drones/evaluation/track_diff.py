@@ -109,7 +109,9 @@ def evaluate_diff_policy(
     scenarios: TrackScenarios,
 ) -> dict[str, torch.Tensor]:
     previous_vertical_rule = getattr(environment, "end_on_vertical_error", True)
+    previous_respawn = getattr(environment, "respawn_on_fail", True)
     environment.end_on_vertical_error = False
+    environment.respawn_on_fail = False
     observation = environment.reset(
         scenarios.initial_position,
         scenarios.initial_quaternion,
@@ -123,6 +125,7 @@ def evaluate_diff_policy(
         return {name: value.detach().clone() for name, value in environment.episode_metrics().items()}
     finally:
         environment.end_on_vertical_error = previous_vertical_rule
+        environment.respawn_on_fail = previous_respawn
         # RigidSolver.get_state() caches every queried state, including in non-differentiable scenes.
         # Reset the scene after evaluation so the 1500-step validation cache does not stay resident between runs.
         environment.scene.reset()

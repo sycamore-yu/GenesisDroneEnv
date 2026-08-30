@@ -101,6 +101,7 @@ def play_diff(checkpoint: Path, payload: dict, max_sim_step: int, respawn: bool)
 
     environment = TrackDiffEnv(settings.environment, num_envs=1, requires_grad=False, show_viewer=True)
     environment.end_on_vertical_error = False
+    environment.respawn_on_fail = respawn
     observation = environment.reset()
     with torch.no_grad():
         for step in range(max_sim_step):
