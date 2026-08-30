@@ -1,0 +1,29 @@
+seed: 1
+max_iterations: 2000
+num_steps_per_env: 80
+save_interval: 100
+obs_groups:
+  policy: ["policy"]
+  critic: ["critic"]
+algorithm:
+  class_name: PPO
+  clip_param: 0.2
+  desired_kl: 0.01
+  entropy_coef: 0.01
+  gamma: 0.999
+  lam: 0.95
+  learning_rate: 0.001
+  max_grad_norm: 1.0
+  num_learning_epochs: 5
+  num_mini_batches: 4
+  schedule: adaptive
+  use_clipped_value_loss: true
+  value_loss_coef: 1.0
+policy:
+  class_name: ActorCritic
+  activation: tanh
+  actor_hidden_dims: [128, 128, 128]
+  critic_hidden_dims: [128, 128, 128]
+  init_noise_std: 0.5
+runner_class_name: OnPolicyRunner
+experiment_name: fixed-seven-race

@@ -179,11 +179,18 @@ class MultilayerPerceptron(nn.Module):
 
 
 class DeterministicActor(nn.Module):
-    def __init__(self, observation_size: int, action_size: int, config: NetworkConfig, hover_action: float):
+    def __init__(
+        self,
+        observation_size: int,
+        action_size: int,
+        config: NetworkConfig,
+        hover_action: float,
+        hover_index: int = 3,
+    ):
         super().__init__()
         self.network = MultilayerPerceptron(observation_size, action_size, config)
         with torch.no_grad():
-            self.network.output.bias[3] = torch.atanh(torch.tensor(hover_action))
+            self.network.output.bias[hover_index] = torch.atanh(torch.tensor(hover_action))
 
     def forward(self, observation: torch.Tensor) -> torch.Tensor:
         return torch.tanh(self.network(observation))
@@ -198,11 +205,12 @@ class StochasticActor(nn.Module):
         hover_action: float,
         log_standard_deviation_min: float,
         log_standard_deviation_max: float,
+        hover_index: int = 3,
     ):
         super().__init__()
         self.mean_network = MultilayerPerceptron(observation_size, action_size, config)
         with torch.no_grad():
-            self.mean_network.output.bias[3] = torch.atanh(torch.tensor(hover_action))
+            self.mean_network.output.bias[hover_index] = torch.atanh(torch.tensor(hover_action))
         self.log_standard_deviation = nn.Parameter(torch.zeros(action_size))
         self.log_standard_deviation_min = log_standard_deviation_min
         self.log_standard_deviation_max = log_standard_deviation_max

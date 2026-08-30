@@ -1,0 +1,42 @@
+seed: 1
+updates: 400
+save_interval: 50
+log_root: logs/race
+eval_states: 100
+eval_seed: 20250830
+num_envs:
+  ppo: 256
+  apg: 256
+  shac: 256
+
+network:
+  hidden_sizes: [256, 128]
+
+environment:
+  dt: 0.01
+  horizon: 32
+  max_episode_steps: 3000
+  enable_gate_contact: false
+  gamma: 0.999
+  td_lambda: 0.95
+
+apg:
+  horizon: 32
+  learning_rate: 0.001
+  max_grad_norm: 1.0
+
+shac:
+  horizon: 32
+  actor_learning_rate: 0.001
+  critic_learning_rate: 0.001
+  gamma: 0.999
+  td_lambda: 0.95
+  entropy_weight: 0.0
+  actor_max_grad_norm: 1.0
+  critic_max_grad_norm: 1.0
+  critic_minibatches: 8
+  critic_iterations: 1
+  target_update_rate: 0.005
+  log_standard_deviation_min: -5.0
+  log_standard_deviation_max: -1.0
+  use_terminal_value: true
