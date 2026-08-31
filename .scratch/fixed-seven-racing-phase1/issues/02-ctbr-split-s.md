@@ -14,4 +14,6 @@
 
 ## Comments（讨论）
 
-开环 CTBR（总推力与机体角速度指令）检查脚本：`scripts/eval/split_s_check.py`。训练策略不读取该脚本中的高度分段动作。
+开环推力/`wy` 扫描已删除。检查脚本 `scripts/eval/split_s_check.py` 用第 4/5 门几何自动生成
+`p4- → g4 → p4+ → p5- → g5 → p5+`，再做四层验证：画图、racing_core 解析穿门、CTBR 限制、Genesis 真实门框接触跟踪。
+训练代码不导入这些航点。

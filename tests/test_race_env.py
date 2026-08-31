@@ -5,7 +5,7 @@ import torch
 import genesis as gs
 
 from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
-from genesis_drones.tasks.racing_core import EvaluationInitialStates
+from genesis_drones.evaluation.split_s import plan_split_s_trajectory, replay_split_s
 
 
 def _ensure_genesis():
@@ -45,39 +45,15 @@ def test_next_state_has_gradient_to_normalized_action():
 
 def test_split_s_is_feasible_with_shared_ctbr_and_real_dynamics():
     _ensure_genesis()
-    environment = RaceEnv(RaceEnvConfig(horizon=1, max_episode_steps=2000), num_envs=1, requires_grad=False)
-    start = EvaluationInitialStates(
-        position=torch.tensor([[-7.0, -5.0, 3.5]], device=gs.device),
-        quaternion=torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=gs.device),
-        linear_velocity=torch.zeros((1, 3), device=gs.device),
+    plan = plan_split_s_trajectory()
+    environment = RaceEnv(
+        RaceEnvConfig(horizon=1, max_episode_steps=len(plan.times) + 50, enable_gate_contact=True),
+        num_envs=1,
+        requires_grad=False,
     )
-    environment.reset(initial_states=start)
-    environment.respawn_on_fail = False
-    environment.gate_index.fill_(4)
-    hover = float(environment.controller.hover_action)
-    passed_fifth = False
-    descended = False
-    west_of_gate = False
-    for step_index in range(800):
-        state = environment._read_state()
-        height = float(state.position[0, 2])
-        if height < 1.8:
-            descended = True
-        if float(state.position[0, 0]) < -5.5:
-            west_of_gate = True
-        if height > 1.5:
-            action = torch.tensor([[hover - 0.02, 0.0, 0.0, 0.0]], device=gs.device)
-        elif height > 1.15:
-            action = torch.tensor([[hover, 0.0, 0.0, 0.0]], device=gs.device)
-        else:
-            action = torch.tensor([[hover + 0.05, 0.0, 0.08, 0.0]], device=gs.device)
-        _, _, _, extras = environment.step(action)
-        if bool(extras["passed"][0]) and int(extras["gate_index"][0]) >= 5:
-            passed_fifth = True
-            break
-    assert descended
-    assert west_of_gate
-    assert passed_fifth
-    # Training policy never sees these waypoints: they live only in this check.
+    result = replay_split_s(environment, plan)
+    assert result["passed4"]
+    assert result["passed5"]
+    assert not result["collision"]
     source = Path(__file__).resolve().parents[1] / "genesis_drones" / "envs" / "race_env.py"
-    assert "hidden waypoint" not in source.read_text()
+    assert "split_s" not in source.read_text()
