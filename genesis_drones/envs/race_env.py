@@ -7,6 +7,12 @@ import torch
 import genesis as gs
 
 from genesis_drones.controllers.ctbr_controller import CtbrController, CtbrControllerConfig
+from genesis_drones.envs.differentiable import (
+    DiffEnvSpec,
+    DiffObservation,
+    DiffTransition,
+    finish_simulation_window,
+)
 from genesis_drones.tasks.racing_core import (
     CRITIC_OBSERVATION_SIZE,
     POLICY_OBSERVATION_SIZE,
@@ -93,6 +99,18 @@ class RaceEnv:
     policy_observation_dim = POLICY_OBSERVATION_SIZE
     critic_observation_dim = CRITIC_OBSERVATION_SIZE
 
+    @classmethod
+    def spec_from_config(cls, config: RaceEnvConfig) -> DiffEnvSpec:
+        hover_action = 2.0 / config.controller.thrust_to_weight_ratio - 1.0
+        return DiffEnvSpec(
+            policy_observation_dim=cls.policy_observation_dim,
+            critic_observation_dim=cls.critic_observation_dim,
+            action_dim=cls.action_dim,
+            horizon=config.horizon,
+            nominal_action=(hover_action, 0.0, 0.0, 0.0),
+            terminal_value_uses_target_critic=True,
+        )
+
     def __init__(
         self,
         config: RaceEnvConfig,
@@ -140,6 +158,7 @@ class RaceEnv:
         self.drone.set_dofs_damping([0.0, 0.0, 0.0, 1e-4, 1e-4, 1e-4])
         self.track = track_to_tensors(track, self.device, gs.tc_float)
         self.controller = CtbrController(config.controller, num_envs, self.device, gs.tc_float)
+        self.spec = self.spec_from_config(config)
         self.last_action = torch.zeros((num_envs, self.action_dim), device=self.device, dtype=gs.tc_float)
         self.gate_index = torch.zeros(num_envs, device=self.device, dtype=torch.int64)
         self.is_alive = torch.ones(num_envs, device=self.device, dtype=torch.bool)
@@ -208,6 +227,10 @@ class RaceEnv:
         self.gate_pass_time.fill_(self.config.max_episode_steps)
         self.path_length.zero_()
         return self._observations(self._read_state())
+
+    def reset_diff(self, seed: int | None = None) -> DiffObservation:
+        policy, critic = self.reset(seed=0 if seed is None else seed)
+        return DiffObservation(policy=policy, critic=critic)
 
     def mix_action(self, action: torch.Tensor, state: DroneState | None = None):
         if state is None:
@@ -341,6 +364,20 @@ class RaceEnv:
         }
         return policy_observation, (physics_loss, policy_loss, reward.detach()), done.detach(), extras
 
+    def step_diff(self, action: torch.Tensor) -> DiffTransition:
+        policy, losses, done, extras = self.step(action)
+        physics_loss, policy_loss, reward = losses
+        return DiffTransition(
+            observation=DiffObservation(policy=policy, critic=extras["critic_observation_live"]),
+            bootstrap_critic=extras["critic_observation"],
+            physics_loss=physics_loss,
+            policy_loss=policy_loss,
+            critic_cost=(-reward).detach(),
+            reward=reward,
+            done=done,
+            terminated=extras["terminated"],
+        )
+
     def _reset_envs(self, env_idx: torch.Tensor) -> None:
         count = int(env_idx.numel())
         if count == 0:
@@ -373,3 +410,12 @@ class RaceEnv:
                 self._reset_envs(reset_idx)
         observations = self._observations(self._read_state())
         return detached_torch_tensor(observations[0]), detached_torch_tensor(observations[1])
+
+    def finish_window(
+        self,
+        physics_loss: torch.Tensor,
+        simulation_actions: list[torch.Tensor],
+    ) -> tuple[DiffObservation, torch.Tensor]:
+        action_gradients = finish_simulation_window(self, physics_loss, simulation_actions)
+        policy, critic = self.detach_window()
+        return DiffObservation(policy=policy, critic=critic), action_gradients

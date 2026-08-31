@@ -6,6 +6,7 @@ import yaml
 import genesis as gs
 from rsl_rl.runners import OnPolicyRunner
 
+from genesis_drones.algorithms.diff_rl import diff_algorithm_names
 from genesis_drones.evaluation.track_diff import classify_eval_step
 from genesis_drones.envs.genesis_env import Genesis_env
 from genesis_drones.envs.track_diff_env import TrackDiffEnv
@@ -122,7 +123,7 @@ def main() -> None:
     gs.init(logging_level="warning")
     max_sim_step = 10000
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    if isinstance(payload, dict) and payload.get("algorithm") in ("apg", "shac"):
+    if isinstance(payload, dict) and payload.get("algorithm") in diff_algorithm_names():
         play_diff(args.checkpoint, payload, max_sim_step, args.respawn)
     else:
         play_ppo(args.checkpoint, max_sim_step, args.respawn)

@@ -4,12 +4,13 @@ from pathlib import Path
 import yaml
 
 from genesis_drones.algorithms.diff_rl import (
-    ApgAgent,
     ApgConfig,
     NetworkConfig,
     RunningNormalizer,
-    ShacAgent,
     ShacConfig,
+    build_diff_algorithm_config,
+    diff_algorithm_names,
+    make_diff_agent,
 )
 from genesis_drones.envs.track_diff_env import RewardScales, TrackDiffEnv, TrackDiffEnvConfig
 
@@ -21,6 +22,7 @@ class TrackDiffSettings:
     network: NetworkConfig
     apg: ApgConfig
     shac: ShacConfig
+    algorithms: dict[str, ApgConfig | ShacConfig]
     seed: int
     updates: int
     save_interval: int
@@ -31,6 +33,7 @@ class TrackDiffSettings:
     test_seed: int
     apg_num_envs: int
     shac_num_envs: int
+    algorithm_num_envs: dict[str, int]
 
 
 def build_track_diff_settings(data: dict, project_root: Path) -> TrackDiffSettings:
@@ -44,6 +47,11 @@ def build_track_diff_settings(data: dict, project_root: Path) -> TrackDiffSettin
     environment_data = data["environment"]
     angle = flight_config["ang"]
     reward_data = data.get("reward_scales", task_config["reward_scales"])
+    algorithms = {
+        name: build_diff_algorithm_config(name, data[name])
+        for name in diff_algorithm_names()
+        if name in data
+    }
     environment = TrackDiffEnvConfig(
         dt=genesis_config["dt"],
         horizon=environment_data["horizon"],
@@ -107,8 +115,9 @@ def build_track_diff_settings(data: dict, project_root: Path) -> TrackDiffSettin
         raw=data,
         environment=environment,
         network=NetworkConfig(hidden_sizes=tuple(data["network"]["hidden_sizes"])),
-        apg=ApgConfig(**data["apg"]),
-        shac=ShacConfig(**data["shac"]),
+        apg=algorithms["apg"],
+        shac=algorithms["shac"],
+        algorithms=algorithms,
         seed=data["seed"],
         updates=data["updates"],
         save_interval=data["save_interval"],
@@ -119,6 +128,7 @@ def build_track_diff_settings(data: dict, project_root: Path) -> TrackDiffSettin
         test_seed=data["test_seed"],
         apg_num_envs=data["num_envs"]["apg"],
         shac_num_envs=data["num_envs"]["shac"],
+        algorithm_num_envs=data["num_envs"],
     )
 
 
@@ -129,11 +139,10 @@ def load_track_diff_settings(path: Path) -> TrackDiffSettings:
 
 
 def make_track_diff_agent(algorithm: str, settings: TrackDiffSettings, device):
-    observation_size = TrackDiffEnv.observation_dim
-    ratio = settings.environment.thrust_to_weight_ratio
-    if algorithm == "apg":
-        return ApgAgent(observation_size, TrackDiffEnv.action_dim, ratio, settings.network, settings.apg, device)
-    return ShacAgent(observation_size, TrackDiffEnv.action_dim, ratio, settings.network, settings.shac, device)
+    if algorithm not in settings.algorithms:
+        raise ValueError(f"algorithm {algorithm!r} has no track configuration")
+    spec = TrackDiffEnv.spec_from_config(settings.environment)
+    return make_diff_agent(algorithm, spec, settings.network, settings.algorithms[algorithm], device)
 
 
 def make_track_diff_normalizer(device) -> RunningNormalizer:

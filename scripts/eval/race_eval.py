@@ -7,8 +7,13 @@ import yaml
 
 import genesis as gs
 
-from genesis_drones.algorithms.diff_rl import NetworkConfig, RunningNormalizer
-from genesis_drones.algorithms.race_rl import RacingApgAgent, RacingShacAgent
+from genesis_drones.algorithms.diff_rl import (
+    NetworkConfig,
+    RunningNormalizer,
+    build_diff_algorithm_config,
+    diff_algorithm_names,
+    make_diff_agent,
+)
 from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
 from genesis_drones.evaluation.race import (
     RACING_CONTRACT,
@@ -26,7 +31,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo", choices=("ppo", "apg", "shac"), required=True)
+    parser.add_argument("--algo", choices=("ppo", *diff_algorithm_names()), required=True)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config" / "race" / "train.yaml")
     parser.add_argument("--states", type=Path, default=PROJECT_ROOT / "config" / "race" / "eval_states.pt")
@@ -87,28 +92,9 @@ def load_action_fn(args: argparse.Namespace, data: dict, environment: RaceEnv):
     if algorithm != args.algo:
         raise ValueError("checkpoint algorithm does not match --algo")
     network = NetworkConfig(hidden_sizes=tuple(data["network"]["hidden_sizes"]))
-    if args.algo == "apg":
-        from genesis_drones.algorithms.diff_rl import ApgConfig
-
-        agent = RacingApgAgent(
-            RaceEnv.policy_observation_dim, RaceEnv.action_dim, hover, network, ApgConfig(**data["apg"]), gs.device
-        )
-        agent.load_state_dict(payload["agent"])
-        normalizer = RunningNormalizer(RaceEnv.policy_observation_dim).to(gs.device)
-        normalizer.load_state_dict(payload["policy_normalizer"])
-        return lambda observation: agent.action(observation, normalizer, deterministic=True)
-    if args.algo == "shac":
-        from genesis_drones.algorithms.diff_rl import ShacConfig
-
-        agent = RacingShacAgent(
-            RaceEnv.policy_observation_dim,
-            RaceEnv.critic_observation_dim,
-            RaceEnv.action_dim,
-            hover,
-            network,
-            ShacConfig(**data["shac"]),
-            gs.device,
-        )
+    if args.algo in diff_algorithm_names():
+        algorithm_config = build_diff_algorithm_config(args.algo, data[args.algo])
+        agent = make_diff_agent(args.algo, environment.spec, network, algorithm_config, gs.device)
         agent.load_state_dict(payload["agent"])
         normalizer = RunningNormalizer(RaceEnv.policy_observation_dim).to(gs.device)
         normalizer.load_state_dict(payload["policy_normalizer"])

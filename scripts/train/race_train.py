@@ -9,8 +9,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 import genesis as gs
 
-from genesis_drones.algorithms.diff_rl import ApgConfig, NetworkConfig, RunningNormalizer, ShacConfig
-from genesis_drones.algorithms.race_rl import RacingApgAgent, RacingShacAgent
+from genesis_drones.algorithms.diff_rl import (
+    NetworkConfig,
+    RunningNormalizer,
+    build_diff_algorithm_config,
+    diff_algorithm_names,
+    make_diff_agent,
+)
 from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
 from genesis_drones.evaluation.race import RACING_CONTRACT, assert_shared_racing_contract
 from genesis_drones.tasks.race_task import RaceTask
@@ -21,7 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo", choices=("ppo", "apg", "shac"), required=True)
+    parser.add_argument("--algo", choices=("ppo", *diff_algorithm_names()), required=True)
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config" / "race" / "train.yaml")
     parser.add_argument("--horizon", type=int, choices=(32, 64, 96))
     parser.add_argument("--num-envs", type=int)
@@ -77,42 +82,23 @@ def train_diff(args: argparse.Namespace, data: dict, log_dir: Path) -> None:
     num_envs = data["num_envs"][args.algo] if args.num_envs is None else args.num_envs
     if args.horizon is not None:
         data["environment"]["horizon"] = args.horizon
-        data["apg"]["horizon"] = args.horizon
-        data["shac"]["horizon"] = args.horizon
+        data[args.algo]["horizon"] = args.horizon
     environment = make_env(data, num_envs, requires_grad=True)
     network = NetworkConfig(hidden_sizes=tuple(data["network"]["hidden_sizes"]))
-    hover = environment.controller.hover_action
     policy_normalizer = RunningNormalizer(RaceEnv.policy_observation_dim).to(gs.device)
     critic_normalizer = RunningNormalizer(RaceEnv.critic_observation_dim).to(gs.device)
-    if args.algo == "apg":
-        agent = RacingApgAgent(
-            RaceEnv.policy_observation_dim,
-            RaceEnv.action_dim,
-            hover,
-            network,
-            ApgConfig(**data["apg"]),
-            gs.device,
-        )
-    else:
-        agent = RacingShacAgent(
-            RaceEnv.policy_observation_dim,
-            RaceEnv.critic_observation_dim,
-            RaceEnv.action_dim,
-            hover,
-            network,
-            ShacConfig(**data["shac"]),
-            gs.device,
-        )
-    observation, critic_observation = environment.reset(seed=data["seed"])
+    algorithm_config = build_diff_algorithm_config(args.algo, data[args.algo])
+    agent = make_diff_agent(args.algo, environment.spec, network, algorithm_config, gs.device)
+    observation = environment.reset_diff(seed=data["seed"])
     writer = SummaryWriter(log_dir)
     updates = data["updates"] if args.updates is None else args.updates
     for update in range(1, updates + 1):
-        if args.algo == "apg":
-            observation, critic_observation, stats = agent.update(environment, observation, policy_normalizer)
-        else:
-            observation, critic_observation, stats = agent.update(
-                environment, observation, critic_observation, policy_normalizer, critic_normalizer
-            )
+        observation, stats = agent.update(
+            environment,
+            observation,
+            policy_normalizer,
+            critic_normalizer,
+        )
         writer.add_scalar("loss/actor", stats.actor_loss, update)
         writer.add_scalar("reward/mean", stats.mean_reward, update)
         writer.add_scalar("train/gamma", environment.config.gamma, update)

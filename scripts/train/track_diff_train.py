@@ -10,7 +10,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 import genesis as gs
 
-from genesis_drones.algorithms.diff_rl import ApgAgent, RunningNormalizer, ShacAgent
+from genesis_drones.algorithms.diff_rl import ApgAgent, RunningNormalizer, ShacAgent, diff_algorithm_names
+from genesis_drones.envs.differentiable import DiffObservation
 from genesis_drones.envs.track_diff_env import TrackDiffEnv
 from genesis_drones.evaluation.track_diff import TrackScenarios, evaluate_diff_policy, summarize_metrics
 from genesis_drones.utils.track_diff_config import (
@@ -26,12 +27,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo", choices=("apg", "shac"), required=True)
+    parser.add_argument("--algo", choices=diff_algorithm_names(), required=True)
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config" / "track_diff" / "train.yaml")
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--updates", type=int)
     parser.add_argument("--validation-scenarios", type=int)
-    parser.add_argument("--horizon", type=int, help="override environment/apg/shac horizon together")
+    parser.add_argument("--horizon", type=int, help="override environment and selected algorithm horizon together")
     parser.add_argument("--progress-norm", choices=("l1", "l2"))
     parser.add_argument("--closing-velocity-weight", type=float)
     parser.add_argument("--arrival-surrogate", choices=("none", "gaussian", "sigmoid"))
@@ -98,10 +99,11 @@ def main() -> None:
     changed = False
     if args.horizon is not None:
         data["environment"] = {**data["environment"], "horizon": args.horizon}
-        data["apg"] = {**data["apg"], "horizon": args.horizon}
-        data["shac"] = {**data["shac"], "horizon": args.horizon}
+        data[args.algo] = {**data[args.algo], "horizon": args.horizon}
         changed = True
     if args.no_terminal_value:
+        if args.algo != "shac":
+            raise ValueError("--no-terminal-value requires --algo shac")
         data["shac"] = {**data["shac"], "use_terminal_value": False}
         changed = True
     if args.progress_norm is not None:
@@ -133,7 +135,7 @@ def main() -> None:
         settings = build_track_diff_settings(checkpoint["config"], PROJECT_ROOT)
 
     updates = settings.updates if args.updates is None else args.updates
-    num_envs_default = settings.apg_num_envs if args.algo == "apg" else settings.shac_num_envs
+    num_envs_default = settings.algorithm_num_envs[args.algo]
     num_envs = num_envs_default if args.num_envs is None else args.num_envs
     validation_scenario_count = (
         settings.validation_scenarios if args.validation_scenarios is None else args.validation_scenarios
@@ -168,14 +170,15 @@ def main() -> None:
     # Optimizers must exist before the differentiable scene initializes its gradient runtime.
     environment = TrackDiffEnv(settings.environment, num_envs, requires_grad=True)
     if checkpoint is None:
-        observation = environment.reset()
+        observation = environment.reset_diff()
         start_update = 0
         environment_steps = 0
         best_key = None
         best_update = 0
         elapsed_before_resume = 0.0
     else:
-        observation = environment.load_state_dict(checkpoint["environment"])
+        policy_observation = environment.load_state_dict(checkpoint["environment"])
+        observation = DiffObservation(policy=policy_observation, critic=policy_observation)
         start_update = checkpoint["update"]
         environment_steps = checkpoint["environment_steps"]
         best_key = checkpoint["best_key"]
@@ -240,7 +243,7 @@ def main() -> None:
         observation, stats = agent.update(environment, observation, normalizer)
         environment_steps += num_envs * stats.steps
         if environment.episode_step >= settings.environment.max_episode_steps or not environment.is_alive.any():
-            observation = environment.reset()
+            observation = environment.reset_diff()
 
         writer.add_scalar("train/actor_loss", stats.actor_loss, update)
         writer.add_scalar("train/actor_grad_norm", stats.actor_grad_norm, update)
@@ -330,8 +333,9 @@ def main() -> None:
     estimated_peak_memory = non_torch_memory + peak_reserved
     result = {
         "algorithm": args.algo,
+        "seed": settings.seed,
         "horizon": horizon,
-        "use_terminal_value": None if args.algo != "shac" else settings.shac.use_terminal_value,
+        "use_terminal_value": getattr(settings.algorithms[args.algo], "use_terminal_value", None),
         "progress_norm": settings.environment.progress_norm,
         "closing_velocity_weight": settings.environment.closing_velocity_weight,
         "arrival_surrogate": settings.environment.arrival_surrogate,

@@ -90,6 +90,24 @@ python scripts/train/track_diff_train.py --algo apg --updates 300
 python scripts/train/track_diff_train.py --algo shac --updates 300
 ```
 
+Use one command to pair a differentiable environment with an algorithm:
+```bash
+python scripts/train/diff_train.py track --algo apg
+python scripts/train/diff_train.py track --algo shac
+python scripts/train/diff_train.py race --algo apg
+python scripts/train/diff_train.py race --algo shac
+```
+New environments register one training runner in `diff_train.py`. New algorithms register once in `DIFF_ALGORITHMS`.
+
+Run a predefined experiment plan from one entry point:
+```bash
+python scripts/train/track_diff_experiments.py horizon
+python scripts/train/track_diff_experiments.py objective
+python scripts/train/track_diff_experiments.py fully-differentiable
+python scripts/train/track_diff_experiments.py remaining
+```
+Add `--dry-run` to print the commands without starting training.
+
 Plot PPO, APG, and SHAC train reward and loss against wall-clock time:
 ```bash
 python scripts/eval/plot_track_diff_convergence.py

@@ -11,7 +11,11 @@ from torch.nn import functional as F
 
 import genesis as gs
 
-from genesis_drones.envs.track_diff_env import TrackDiffEnv
+from genesis_drones.envs.differentiable import (
+    DiffEnvSpec,
+    DiffObservation,
+    DifferentiableEnvironment,
+)
 
 
 @dataclass(frozen=True)
@@ -184,13 +188,17 @@ class DeterministicActor(nn.Module):
         observation_size: int,
         action_size: int,
         config: NetworkConfig,
-        hover_action: float,
+        hover_action: float | tuple[float, ...],
         hover_index: int = 3,
     ):
         super().__init__()
         self.network = MultilayerPerceptron(observation_size, action_size, config)
         with torch.no_grad():
-            self.network.output.bias[hover_index] = torch.atanh(torch.tensor(hover_action))
+            if isinstance(hover_action, tuple):
+                initial_action = self.network.output.bias.new_tensor(hover_action)
+                self.network.output.bias.copy_(torch.atanh(initial_action))
+            else:
+                self.network.output.bias[hover_index] = torch.atanh(torch.tensor(hover_action))
 
     def forward(self, observation: torch.Tensor) -> torch.Tensor:
         return torch.tanh(self.network(observation))
@@ -202,7 +210,7 @@ class StochasticActor(nn.Module):
         observation_size: int,
         action_size: int,
         config: NetworkConfig,
-        hover_action: float,
+        hover_action: float | tuple[float, ...],
         log_standard_deviation_min: float,
         log_standard_deviation_max: float,
         hover_index: int = 3,
@@ -210,7 +218,11 @@ class StochasticActor(nn.Module):
         super().__init__()
         self.mean_network = MultilayerPerceptron(observation_size, action_size, config)
         with torch.no_grad():
-            self.mean_network.output.bias[hover_index] = torch.atanh(torch.tensor(hover_action))
+            if isinstance(hover_action, tuple):
+                initial_action = self.mean_network.output.bias.new_tensor(hover_action)
+                self.mean_network.output.bias.copy_(torch.atanh(initial_action))
+            else:
+                self.mean_network.output.bias[hover_index] = torch.atanh(torch.tensor(hover_action))
         self.log_standard_deviation = nn.Parameter(torch.zeros(action_size))
         self.log_standard_deviation_min = log_standard_deviation_min
         self.log_standard_deviation_max = log_standard_deviation_max
@@ -242,15 +254,17 @@ class Critic(nn.Module):
 class ApgAgent:
     def __init__(
         self,
-        observation_size: int,
-        action_size: int,
-        thrust_to_weight_ratio: float,
+        spec: DiffEnvSpec,
         network_config: NetworkConfig,
         config: ApgConfig,
         device: torch.device,
     ):
-        hover_action = 2.0 / thrust_to_weight_ratio - 1.0
-        self.actor = DeterministicActor(observation_size, action_size, network_config, hover_action).to(device)
+        self.actor = DeterministicActor(
+            spec.policy_observation_dim,
+            spec.action_dim,
+            network_config,
+            spec.nominal_action,
+        ).to(device)
         self.optimizer = torch.optim.Adam(self.actor.parameters(), lr=config.learning_rate, betas=(0.7, 0.95))
         self.config = config
 
@@ -261,33 +275,37 @@ class ApgAgent:
 
     def update(
         self,
-        environment: TrackDiffEnv,
-        observation: torch.Tensor,
+        environment: DifferentiableEnvironment,
+        observation: DiffObservation,
         normalizer: RunningNormalizer,
-    ) -> tuple[torch.Tensor, UpdateStats]:
+        _critic_normalizer: RunningNormalizer | None = None,
+    ) -> tuple[DiffObservation, UpdateStats]:
         steps = self.config.horizon
+        if steps != environment.spec.horizon:
+            raise ValueError("algorithm horizon must match differentiable environment horizon")
         tracked = environment.is_alive.clone()
-        physics_loss = observation.new_zeros(())
-        policy_loss = observation.new_zeros(())
-        reward_sum = observation.new_zeros(())
+        physics_loss = observation.policy.new_zeros(())
+        policy_loss = observation.policy.new_zeros(())
+        reward_sum = observation.policy.new_zeros(())
         actor_actions = []
         sim_actions = []
         previous_action = environment.last_action.detach()
         for _ in range(steps):
             is_alive_before = environment.is_alive.clone()
-            normalizer.update(observation, is_alive_before)
-            action_actor = self.actor(normalizer(observation.detach()))
+            normalizer.update(observation.policy, is_alive_before)
+            action_actor = self.actor(normalizer(observation.policy.detach()))
             action_sim = as_simulation_action(action_actor)
-            observation, (step_physics_loss, _, reward), _, _ = environment.step(action_sim)
-            physics_loss = physics_loss + step_physics_loss.sum()
+            transition = environment.step_diff(action_sim)
+            observation = transition.observation
+            physics_loss = physics_loss + transition.physics_loss.sum()
             policy_loss = policy_loss + actor_action_delta_loss(
                 action_actor,
                 previous_action,
                 is_alive_before,
-                environment.config.action_delta_weight,
+                environment.spec.action_delta_weight,
             )
             previous_action = action_actor
-            reward_sum = reward_sum + reward.sum()
+            reward_sum = reward_sum + transition.reward.sum()
             actor_actions.append(action_actor)
             sim_actions.append(action_sim)
 
@@ -296,16 +314,11 @@ class ApgAgent:
         policy_loss = policy_loss / denominator
         actor_loss = (physics_loss + policy_loss).detach()
         self.optimizer.zero_grad(set_to_none=True)
-        environment.scene.backward(physics_loss)
-        action_gradients = collect_simulation_action_gradients(sim_actions)
-        for action in sim_actions:
-            action.grad = None
-        environment.release_simulation_graphs(physics_loss)
+        observation, action_gradients = environment.finish_window(physics_loss, sim_actions)
         physics_loss = physics_loss.detach()
         apply_actor_action_gradients(actor_actions, action_gradients, policy_loss)
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config.max_grad_norm)
         self.optimizer.step()
-        observation = environment.detach_window()
         return observation, UpdateStats(
             actor_loss=actor_loss.item(),
             actor_grad_norm=actor_grad_norm.item(),
@@ -328,23 +341,20 @@ class ApgAgent:
 class ShacAgent:
     def __init__(
         self,
-        observation_size: int,
-        action_size: int,
-        thrust_to_weight_ratio: float,
+        spec: DiffEnvSpec,
         network_config: NetworkConfig,
         config: ShacConfig,
         device: torch.device,
     ):
-        hover_action = 2.0 / thrust_to_weight_ratio - 1.0
         self.actor = StochasticActor(
-            observation_size,
-            action_size,
+            spec.policy_observation_dim,
+            spec.action_dim,
             network_config,
-            hover_action,
+            spec.nominal_action,
             config.log_standard_deviation_min,
             config.log_standard_deviation_max,
         ).to(device)
-        self.critic = Critic(observation_size, network_config).to(device)
+        self.critic = Critic(spec.critic_observation_dim, network_config).to(device)
         self.target_critic = deepcopy(self.critic)
         self.target_critic.requires_grad_(False)
         self.actor_optimizer = torch.optim.Adam(
@@ -363,59 +373,67 @@ class ShacAgent:
 
     def update(
         self,
-        environment: TrackDiffEnv,
-        observation: torch.Tensor,
+        environment: DifferentiableEnvironment,
+        observation: DiffObservation,
         normalizer: RunningNormalizer,
-    ) -> tuple[torch.Tensor, UpdateStats]:
+        critic_normalizer: RunningNormalizer | None = None,
+    ) -> tuple[DiffObservation, UpdateStats]:
         steps = self.config.horizon
+        if steps != environment.spec.horizon:
+            raise ValueError("algorithm horizon must match differentiable environment horizon")
+        critic_normalizer = normalizer if critic_normalizer is None else critic_normalizer
         tracked = environment.is_alive.clone()
-        physics_actor_loss = observation.new_zeros(())
-        policy_actor_loss = observation.new_zeros(())
-        entropy_sum = observation.new_zeros(())
-        reward_sum = observation.new_zeros(())
+        physics_actor_loss = observation.policy.new_zeros(())
+        policy_actor_loss = observation.policy.new_zeros(())
+        entropy_sum = observation.policy.new_zeros(())
+        reward_sum = observation.policy.new_zeros(())
         actor_actions = []
         sim_actions = []
         previous_action = environment.last_action.detach()
         rollout = ShacRollout([], [], [], [], [], [], [])
-        discount = observation.new_ones(observation.shape[0])
+        discount = observation.policy.new_ones(observation.policy.shape[0])
 
         for _ in range(steps):
             is_alive_before = environment.is_alive.clone()
-            normalizer.update(observation, is_alive_before)
-            normalized_observation = normalizer(observation.detach())
+            normalizer.update(observation.policy, is_alive_before)
+            if critic_normalizer is not normalizer:
+                critic_normalizer.update(observation.critic, is_alive_before)
+            normalized_observation = normalizer(observation.policy.detach())
+            normalized_critic_observation = critic_normalizer(observation.critic.detach())
             if self.config.entropy_weight == 0.0:
                 action_actor = self.actor.deterministic(normalized_observation)
-                entropy = observation.new_zeros(observation.shape[0])
+                entropy = observation.policy.new_zeros(observation.policy.shape[0])
             else:
                 action_actor, entropy = self.actor.sample(normalized_observation)
             action_sim = as_simulation_action(action_actor)
             with torch.no_grad():
-                value = self.critic(normalized_observation.detach())
-            next_observation, (physics_loss, policy_loss, reward), done, extras = environment.step(action_sim)
+                value = self.critic(normalized_critic_observation)
+            transition = environment.step_diff(action_sim)
             with torch.no_grad():
-                next_value = self.target_critic(normalizer(next_observation).detach()).clamp(-20.0, 20.0)
+                bootstrap_critic = critic_normalizer(transition.bootstrap_critic).detach()
+                next_value = self.target_critic(bootstrap_critic).clamp(-20.0, 20.0)
 
-            physics_actor_loss = physics_actor_loss + (physics_loss * discount).sum()
+            physics_actor_loss = physics_actor_loss + (transition.physics_loss * discount).sum()
             policy_actor_loss = policy_actor_loss + actor_action_delta_loss(
                 action_actor,
                 previous_action,
                 is_alive_before,
-                environment.config.action_delta_weight,
+                environment.spec.action_delta_weight,
                 discount=discount,
             )
             previous_action = action_actor
             entropy_sum = entropy_sum + (entropy * is_alive_before).sum()
-            reward_sum = reward_sum + reward.sum()
-            rollout.observations.append(normalized_observation.detach())
-            rollout.losses.append((physics_loss + policy_loss).detach())
+            reward_sum = reward_sum + transition.reward.sum()
+            rollout.observations.append(normalized_critic_observation)
+            rollout.losses.append(transition.critic_cost)
             rollout.values.append(value)
             rollout.next_values.append(next_value)
-            rollout.dones.append(done)
-            rollout.terminated.append(extras["terminated"])
+            rollout.dones.append(transition.done)
+            rollout.terminated.append(transition.terminated)
             rollout.valid.append(is_alive_before)
             actor_actions.append(action_actor)
             sim_actions.append(action_sim)
-            observation = next_observation
+            observation = transition.observation
             discount = discount * self.config.gamma
 
         # Short-horizon SHAC: L_π = Σ γ^t L_t + γ^H V(s_H). Freeze critic weights so the
@@ -423,8 +441,9 @@ class ShacAgent:
         if self.config.use_terminal_value:
             for parameter in self.critic.parameters():
                 parameter.requires_grad_(False)
-            terminal_observation = normalizer(observation)
-            terminal_value = self.critic(terminal_observation)
+            terminal_observation = critic_normalizer(observation.critic)
+            terminal_critic = self.target_critic if environment.spec.terminal_value_uses_target_critic else self.critic
+            terminal_value = terminal_critic(terminal_observation)
             terminal_value = terminal_value * environment.is_alive.to(dtype=terminal_value.dtype)
             physics_actor_loss = physics_actor_loss + (terminal_value * discount).sum()
 
@@ -434,11 +453,7 @@ class ShacAgent:
         policy_actor_loss = policy_actor_loss / denominator - self.config.entropy_weight * entropy
         actor_loss = (physics_actor_loss + policy_actor_loss).detach()
         self.actor_optimizer.zero_grad(set_to_none=True)
-        environment.scene.backward(physics_actor_loss)
-        action_gradients = collect_simulation_action_gradients(sim_actions)
-        for action in sim_actions:
-            action.grad = None
-        environment.release_simulation_graphs(physics_actor_loss)
+        observation, action_gradients = environment.finish_window(physics_actor_loss, sim_actions)
         physics_actor_loss = physics_actor_loss.detach()
         apply_actor_action_gradients(actor_actions, action_gradients, policy_actor_loss)
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config.actor_max_grad_norm)
@@ -446,7 +461,6 @@ class ShacAgent:
         if self.config.use_terminal_value:
             for parameter in self.critic.parameters():
                 parameter.requires_grad_(True)
-        observation = environment.detach_window()
 
         losses = torch.stack(rollout.losses)
         values = torch.stack(rollout.values)
@@ -515,3 +529,34 @@ class ShacAgent:
         self.target_critic.load_state_dict(state["target_critic"])
         self.actor_optimizer.load_state_dict(state["actor_optimizer"])
         self.critic_optimizer.load_state_dict(state["critic_optimizer"])
+
+
+DIFF_ALGORITHMS = {
+    "apg": (ApgAgent, ApgConfig),
+    "shac": (ShacAgent, ShacConfig),
+}
+
+
+def diff_algorithm_names() -> tuple[str, ...]:
+    return tuple(DIFF_ALGORITHMS)
+
+
+def build_diff_algorithm_config(algorithm: str, data: dict) -> ApgConfig | ShacConfig:
+    if algorithm not in DIFF_ALGORITHMS:
+        raise ValueError(f"unknown differentiable algorithm {algorithm!r}; valid: {', '.join(DIFF_ALGORITHMS)}")
+    return DIFF_ALGORITHMS[algorithm][1](**data)
+
+
+def make_diff_agent(
+    algorithm: str,
+    spec: DiffEnvSpec,
+    network_config: NetworkConfig,
+    config: ApgConfig | ShacConfig,
+    device: torch.device,
+) -> ApgAgent | ShacAgent:
+    if algorithm not in DIFF_ALGORITHMS:
+        raise ValueError(f"unknown differentiable algorithm {algorithm!r}; valid: {', '.join(DIFF_ALGORITHMS)}")
+    agent_type, config_type = DIFF_ALGORITHMS[algorithm]
+    if not isinstance(config, config_type):
+        raise TypeError(f"{algorithm} requires {config_type.__name__}")
+    return agent_type(spec, network_config, config, device)

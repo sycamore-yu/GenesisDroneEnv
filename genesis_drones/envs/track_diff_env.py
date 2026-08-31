@@ -7,6 +7,13 @@ from torch.nn import functional as F
 
 import genesis as gs
 
+from genesis_drones.envs.differentiable import (
+    DiffEnvSpec,
+    DiffObservation,
+    DiffTransition,
+    finish_simulation_window,
+)
+
 
 ASSETS_PATH = Path(__file__).resolve().parents[1] / "robots" / "assets"
 
@@ -211,6 +218,18 @@ class TrackDiffEnv:
     action_dim = 4
     observation_dim = 23
 
+    @classmethod
+    def spec_from_config(cls, config: TrackDiffEnvConfig) -> DiffEnvSpec:
+        hover_action = 2.0 / config.thrust_to_weight_ratio - 1.0
+        return DiffEnvSpec(
+            policy_observation_dim=cls.observation_dim,
+            critic_observation_dim=cls.observation_dim,
+            action_dim=cls.action_dim,
+            horizon=config.horizon,
+            nominal_action=(0.0, 0.0, 0.0, hover_action),
+            action_delta_weight=config.action_delta_weight,
+        )
+
     def __init__(
         self,
         config: TrackDiffEnvConfig,
@@ -224,6 +243,7 @@ class TrackDiffEnv:
         self.requires_grad = requires_grad
         self.device = gs.device
         self.visualize = show_viewer if visualize is None else visualize
+        self.spec = self.spec_from_config(config)
 
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(
@@ -422,6 +442,12 @@ class TrackDiffEnv:
 
         self._sync_target_visual()
         return self._make_observation(self._read_state()).detach()
+
+    def reset_diff(self, seed: int | None = None) -> DiffObservation:
+        if seed is not None:
+            torch.manual_seed(seed)
+        observation = self.reset()
+        return DiffObservation(policy=observation, critic=observation)
 
     def mix_action(self, action: torch.Tensor, state: DroneState | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         action = action.clamp(-1.0, 1.0)
@@ -632,6 +658,20 @@ class TrackDiffEnv:
         }
         return observation, (physics_loss, policy_loss, reward), done.detach(), extras
 
+    def step_diff(self, action: torch.Tensor) -> DiffTransition:
+        observation, losses, done, extras = self.step(action)
+        physics_loss, policy_loss, reward = losses
+        return DiffTransition(
+            observation=DiffObservation(policy=observation, critic=observation),
+            bootstrap_critic=observation,
+            physics_loss=physics_loss,
+            policy_loss=policy_loss,
+            critic_cost=(physics_loss + policy_loss).detach(),
+            reward=reward.detach(),
+            done=done,
+            terminated=extras["terminated"],
+        )
+
     def _reset_envs(self, env_idx: torch.Tensor) -> None:
         count = int(env_idx.numel())
         if count == 0:
@@ -740,6 +780,15 @@ class TrackDiffEnv:
             if reset_idx.numel() > 0:
                 self._reset_envs(reset_idx)
         return self._make_observation(self._read_state()).detach()
+
+    def finish_window(
+        self,
+        physics_loss: torch.Tensor,
+        simulation_actions: list[torch.Tensor],
+    ) -> tuple[DiffObservation, torch.Tensor]:
+        action_gradients = finish_simulation_window(self, physics_loss, simulation_actions)
+        observation = self.detach_window()
+        return DiffObservation(policy=observation, critic=observation), action_gradients
 
     def episode_metrics(self) -> dict[str, torch.Tensor]:
         capped_steps = min(self.episode_step, self.config.max_episode_steps)

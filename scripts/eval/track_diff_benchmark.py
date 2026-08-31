@@ -7,6 +7,7 @@ import torch
 
 import genesis as gs
 
+from genesis_drones.algorithms.diff_rl import diff_algorithm_names
 from genesis_drones.envs.track_diff_env import TrackDiffEnv
 from genesis_drones.utils.track_diff_config import (
     load_track_diff_settings,
@@ -35,7 +36,7 @@ def linear_slope(values: list[int]) -> float:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo", choices=("apg", "shac"), required=True)
+    parser.add_argument("--algo", choices=diff_algorithm_names(), required=True)
     parser.add_argument("--num-envs", type=int, required=True)
     parser.add_argument("--updates", type=int, default=64)
     parser.add_argument("--validation-scenarios", type=int, default=256)
@@ -55,7 +56,7 @@ def main() -> None:
     agent = make_track_diff_agent(args.algo, settings, gs.device)
     normalizer = make_track_diff_normalizer(gs.device)
     environment = TrackDiffEnv(settings.environment, args.num_envs, requires_grad=True)
-    observation = environment.reset()
+    observation = environment.reset_diff()
     if args.validation_scenarios > 0:
         validation_environment = TrackDiffEnv(
             settings.environment, args.validation_scenarios, requires_grad=False
@@ -71,7 +72,7 @@ def main() -> None:
             gc.collect()
         allocated_history.append(torch.cuda.memory_allocated())
         if environment.episode_step >= settings.environment.max_episode_steps or not environment.is_alive.any():
-            observation = environment.reset()
+            observation = environment.reset_diff()
     free_memory, total_memory = torch.cuda.mem_get_info()
     peak_allocated = torch.cuda.max_memory_allocated()
     peak_reserved = torch.cuda.max_memory_reserved()

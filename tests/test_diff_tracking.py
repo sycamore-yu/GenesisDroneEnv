@@ -3,7 +3,6 @@ import torch
 import genesis as gs
 
 from genesis_drones.algorithms.diff_rl import (
-    ApgAgent,
     ApgConfig,
     DeterministicActor,
     NetworkConfig,
@@ -11,6 +10,7 @@ from genesis_drones.algorithms.diff_rl import (
     apply_actor_action_gradients,
     as_simulation_action,
     collect_simulation_action_gradients,
+    make_diff_agent,
 )
 from genesis_drones.envs.track_diff_env import TrackDiffEnv, TrackDiffEnvConfig, smooth_safety_penalty, tracking_progress, closing_velocity, arrival_surrogate_bonus
 from genesis_drones.evaluation.track_diff import TrackScenarios, classify_eval_step, evaluate_diff_policy, make_diff_observation
@@ -160,8 +160,15 @@ def test_simulation_action_is_a_detached_leaf():
 
 def test_apg_bridges_action_gradients_across_windows():
     device = _ensure_genesis()
-    agent = ApgAgent(TrackDiffEnv.observation_dim, 4, 3.3, NetworkConfig(), ApgConfig(horizon=2), device)
-    environment = TrackDiffEnv(TrackDiffEnvConfig(horizon=2), 2, requires_grad=True)
+    config = TrackDiffEnvConfig(horizon=2)
+    agent = make_diff_agent(
+        "apg",
+        TrackDiffEnv.spec_from_config(config),
+        NetworkConfig(),
+        ApgConfig(horizon=2),
+        device,
+    )
+    environment = TrackDiffEnv(config, 2, requires_grad=True)
     observation = environment.reset()
     actor_actions = []
     sim_actions = []
@@ -202,7 +209,7 @@ def test_apg_bridges_action_gradients_across_windows():
         actor_grad_norm = actor_grad_norm + parameter.grad.detach().square().sum()
     assert actor_grad_norm > 0
 
-    observation = environment.reset()
+    observation = environment.reset_diff()
     normalizer = RunningNormalizer(TrackDiffEnv.observation_dim).to(device)
     observation, stats = agent.update(environment, observation, normalizer)
     assert environment.episode_step == 2
@@ -210,7 +217,7 @@ def test_apg_bridges_action_gradients_across_windows():
     assert torch.isfinite(torch.tensor(stats.actor_grad_norm))
     observation, stats = agent.update(environment, observation, normalizer)
     assert environment.episode_step == 4
-    assert torch.isfinite(observation).all()
+    assert torch.isfinite(observation.policy).all()
     assert environment.is_alive.any()
 
 
@@ -334,6 +341,7 @@ def test_pid_hover_and_ppo_style_arrival_reward():
     environment = TrackDiffEnv(TrackDiffEnvConfig(horizon=1), 1, requires_grad=False)
     try:
         hover = 2.0 / environment.config.thrust_to_weight_ratio - 1.0
+        assert environment.spec.nominal_action == (0.0, 0.0, 0.0, hover)
         observation = environment.reset(
             torch.tensor([[0.0, 0.0, 0.6]]),
             torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
