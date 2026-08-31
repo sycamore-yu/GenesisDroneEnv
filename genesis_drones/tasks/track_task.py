@@ -1,10 +1,16 @@
 
 import genesis as gs
+import statistics
 import torch
+from collections import deque
 from rsl_rl.env.vec_env import VecEnv
 from tensordict import TensorDict
-import statistics
-from collections import deque
+
+from genesis_drones.envs.track_diff_env import (
+    TrackDiffEnvConfig,
+    differentiable_tracking_reward,
+    tracking_safety_penalty,
+)
 
 def gs_rand_float(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size=shape, device=device) + lower
@@ -50,11 +56,16 @@ class Track_task(VecEnv):
         self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device, dtype=gs.tc_float)
         self.last_actions = torch.zeros_like(self.actions)
 
+        self.fully_differentiable = bool(self.task_config.get("fully_differentiable", False))
+        self.tracking_config = TrackDiffEnvConfig() if self.fully_differentiable else None
+
         # infos
         self.reward_functions = dict()
         self.episode_reward_sums = dict()
         self._register_reward_fun()
-        self.reward_buffer_for_log = {name: deque(maxlen=10) for name in self.reward_functions.keys()}
+        self.reward_buffer_for_log = {
+            name: deque(maxlen=10) for name in (self.reward_functions.keys() if not self.fully_differentiable else ["tracking"])
+        }
         self.extras = dict()  # extra information for logging
 
         # counters
@@ -66,6 +77,30 @@ class Track_task(VecEnv):
 
 
     def compute_reward(self):
+        if self.fully_differentiable:
+            position = self.genesis_env.drone.odom.world_pos
+            quaternion = self.genesis_env.drone.odom.body_quat
+            hover_quaternion = quaternion.new_tensor([1.0, 0.0, 0.0, 0.0]).expand_as(quaternion)
+            config = self.tracking_config
+            reward = (
+                differentiable_tracking_reward(
+                    position,
+                    self.command_buf,
+                    self.genesis_env.drone.odom.world_linear_vel,
+                    quaternion,
+                    hover_quaternion,
+                    self.genesis_env.drone.odom.body_ang_vel,
+                    self.actions,
+                    self.last_actions,
+                    tracking_safety_penalty(position, self.cur_pos_error, config),
+                    config,
+                )
+                * self.step_dt
+            )
+            reward = torch.nan_to_num(reward, nan=-100, posinf=1.0, neginf=-1.0)
+            self.reward_buf += reward
+            self.episode_reward_sums["tracking"] += reward
+            return
         for name, reward_func in self.reward_functions.items():
             reward = reward_func() * self._scale(name)
             self.reward_buf += torch.nan_to_num(reward, nan=-100, posinf=1.0, neginf=-1.0)
@@ -130,6 +165,11 @@ class Track_task(VecEnv):
         self.command_buf[envs_idx, 2] = gs_rand_float(*self.command_cfg["pos_z_range"], (len(envs_idx),), self.device)
 
     def _register_reward_fun(self):
+        if self.fully_differentiable:
+            self.episode_reward_sums["tracking"] = torch.zeros(
+                (self.num_envs,), device=self.device, dtype=gs.tc_float
+            )
+            return
         for name in self.reward_scales.keys():
             self.reward_functions[name] = getattr(self, "_reward_" + name)
             self.episode_reward_sums[name] = torch.zeros((self.num_envs,), device=self.device, dtype=gs.tc_float)
@@ -172,7 +212,8 @@ class Track_task(VecEnv):
         )
         self.compute_reward()
         self.reset(self.reset_buf.nonzero(as_tuple=False).flatten())
-        self._resample_commands(self._at_target())
+        if not self.fully_differentiable:
+            self._resample_commands(self._at_target())
         self._update_obs()
         self.last_actions[:] = self.actions[:]  
 

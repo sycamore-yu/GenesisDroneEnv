@@ -32,6 +32,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--updates", type=int)
     parser.add_argument("--validation-scenarios", type=int)
     parser.add_argument("--horizon", type=int, help="override environment/apg/shac horizon together")
+    parser.add_argument("--progress-norm", choices=("l1", "l2"))
+    parser.add_argument("--closing-velocity-weight", type=float)
+    parser.add_argument("--arrival-surrogate", choices=("none", "gaussian", "sigmoid"))
+    parser.add_argument(
+        "--fully-differentiable",
+        action="store_true",
+        help="fixed-target continuous tracking reward; arrival/crash are metrics only",
+    )
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--save-interval", type=int)
     parser.add_argument(
         "--no-terminal-value",
         action="store_true",
@@ -39,6 +49,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--log-dir", type=Path)
+    parser.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=0,
+        help="stop after this many validation evals without beating best.pt. 0=off",
+    )
     return parser.parse_args()
 
 
@@ -78,14 +94,35 @@ def save_checkpoint(
 def main() -> None:
     args = parse_args()
     settings = load_track_diff_settings(args.config)
-    if args.horizon is not None or args.no_terminal_value:
-        data = dict(settings.raw)
-        if args.horizon is not None:
-            data["environment"] = {**data["environment"], "horizon": args.horizon}
-            data["apg"] = {**data["apg"], "horizon": args.horizon}
-            data["shac"] = {**data["shac"], "horizon": args.horizon}
-        if args.no_terminal_value:
-            data["shac"] = {**data["shac"], "use_terminal_value": False}
+    data = dict(settings.raw)
+    changed = False
+    if args.horizon is not None:
+        data["environment"] = {**data["environment"], "horizon": args.horizon}
+        data["apg"] = {**data["apg"], "horizon": args.horizon}
+        data["shac"] = {**data["shac"], "horizon": args.horizon}
+        changed = True
+    if args.no_terminal_value:
+        data["shac"] = {**data["shac"], "use_terminal_value": False}
+        changed = True
+    if args.progress_norm is not None:
+        data["environment"] = {**data["environment"], "progress_norm": args.progress_norm}
+        changed = True
+    if args.closing_velocity_weight is not None:
+        data["environment"] = {**data["environment"], "closing_velocity_weight": args.closing_velocity_weight}
+        changed = True
+    if args.arrival_surrogate is not None:
+        data["environment"] = {**data["environment"], "arrival_surrogate": args.arrival_surrogate}
+        changed = True
+    if args.fully_differentiable:
+        data["environment"] = {**data["environment"], "fully_differentiable": True}
+        changed = True
+    if args.seed is not None:
+        data["seed"] = args.seed
+        changed = True
+    if args.save_interval is not None:
+        data["save_interval"] = args.save_interval
+        changed = True
+    if changed:
         settings = build_track_diff_settings(data, PROJECT_ROOT)
     gs.init(backend=gs.gpu, seed=settings.seed, logging_level="warning")
     checkpoint = None
@@ -106,7 +143,16 @@ def main() -> None:
     terminal_tag = ""
     if args.algo == "shac":
         terminal_tag = "_old" if not settings.shac.use_terminal_value else "_terminal"
-    default_name = f"{args.algo}{terminal_tag}_H{horizon}_{timestamp}"
+    objective_tag = ""
+    if settings.environment.progress_norm != "l1":
+        objective_tag += f"_{settings.environment.progress_norm}"
+    if settings.environment.closing_velocity_weight != 0.0:
+        objective_tag += f"_close{settings.environment.closing_velocity_weight:g}"
+    if settings.environment.arrival_surrogate != "none":
+        objective_tag += f"_{settings.environment.arrival_surrogate}"
+    if settings.environment.fully_differentiable:
+        objective_tag += "_fulldiff"
+    default_name = f"{args.algo}{terminal_tag}_H{horizon}{objective_tag}_s{settings.seed}_{timestamp}"
     log_dir = args.log_dir or settings.log_root / default_name
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -154,15 +200,25 @@ def main() -> None:
     validation_history = []
     start_time = time.perf_counter()
     torch.cuda.reset_peak_memory_stats()
+    evals_without_improvement = 0
+    stopped_early = False
+    stop_reason = None
 
     if start_update == 0:
         metrics = evaluate_diff_policy(validation_environment, agent, normalizer, validation_scenarios)
         summary = summarize_metrics(metrics, settings.environment.max_episode_steps * settings.environment.dt)
-        best_key = (
-            summary.waypoint_count.mean,
-            -summary.crash_rate.mean,
-            -summary.capped_first_arrival_time.mean,
-        )
+        if settings.environment.fully_differentiable:
+            best_key = (
+                -summary.mean_position_error.mean,
+                -summary.crash_rate.mean,
+                -summary.capped_first_arrival_time.mean,
+            )
+        else:
+            best_key = (
+                summary.waypoint_count.mean,
+                -summary.crash_rate.mean,
+                -summary.capped_first_arrival_time.mean,
+            )
         validation_history.append({"update": 0, "summary": summary.to_dict()})
         torch.save(metrics, log_dir / "validation_metrics_0000.pt")
         save_checkpoint(
@@ -217,14 +273,24 @@ def main() -> None:
                 "validation/capped_first_arrival_time", summary.capped_first_arrival_time.mean, update
             )
             writer.add_scalar("validation/action_total_variation", summary.action_total_variation.mean, update)
-            candidate_key = (
-                summary.waypoint_count.mean,
-                -summary.crash_rate.mean,
-                -summary.capped_first_arrival_time.mean,
-            )
+            if settings.environment.fully_differentiable:
+                candidate_key = (
+                    -summary.mean_position_error.mean,
+                    -summary.crash_rate.mean,
+                    -summary.capped_first_arrival_time.mean,
+                )
+            else:
+                candidate_key = (
+                    summary.waypoint_count.mean,
+                    -summary.crash_rate.mean,
+                    -summary.capped_first_arrival_time.mean,
+                )
             if best_key is None or candidate_key > best_key:
                 best_key = candidate_key
                 best_update = update
+                evals_without_improvement = 0
+            else:
+                evals_without_improvement += 1
             elapsed_seconds = elapsed_before_resume + time.perf_counter() - start_time
             checkpoint_path = log_dir / f"checkpoint_{update:04d}.pt"
             save_checkpoint(
@@ -242,6 +308,20 @@ def main() -> None:
             )
             if best_update == update:
                 shutil.copyfile(checkpoint_path, log_dir / "best.pt")
+            failed = not (stats.actor_loss == stats.actor_loss) or stats.actor_grad_norm != stats.actor_grad_norm
+            if failed:
+                stopped_early = True
+                stop_reason = "non_finite_loss_or_grad"
+                print(f"early stop at update={update}: {stop_reason}", flush=True)
+                break
+            if args.early_stop_patience > 0 and evals_without_improvement >= args.early_stop_patience:
+                stopped_early = True
+                stop_reason = f"no_improvement_for_{evals_without_improvement}_evals"
+                print(
+                    f"early stop at update={update}: {stop_reason} best_update={best_update}",
+                    flush=True,
+                )
+                break
 
     elapsed_seconds = elapsed_before_resume + time.perf_counter() - start_time
     free_memory, total_memory = torch.cuda.mem_get_info()
@@ -252,12 +332,18 @@ def main() -> None:
         "algorithm": args.algo,
         "horizon": horizon,
         "use_terminal_value": None if args.algo != "shac" else settings.shac.use_terminal_value,
+        "progress_norm": settings.environment.progress_norm,
+        "closing_velocity_weight": settings.environment.closing_velocity_weight,
+        "arrival_surrogate": settings.environment.arrival_surrogate,
+        "fully_differentiable": settings.environment.fully_differentiable,
         "dt": settings.environment.dt,
         "gradient_physical_time": horizon * settings.environment.dt,
         "updates": updates,
         "num_envs": num_envs,
         "environment_steps": environment_steps,
         "best_update": best_update,
+        "stopped_early": stopped_early,
+        "stop_reason": stop_reason,
         "elapsed_seconds": elapsed_seconds,
         "peak_memory_bytes": estimated_peak_memory,
         "peak_torch_allocated_bytes": torch.cuda.max_memory_allocated(),

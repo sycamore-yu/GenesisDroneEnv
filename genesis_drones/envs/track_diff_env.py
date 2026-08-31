@@ -62,6 +62,17 @@ class TrackDiffEnvConfig:
     target_y_range: tuple[float, float] = (-1.2, 1.2)
     target_z_range: tuple[float, float] = (0.6, 1.0)
     reward_scales: RewardScales = RewardScales()
+    progress_norm: str = "l1"
+    closing_velocity_weight: float = 0.0
+    arrival_surrogate: str = "none"
+    arrival_surrogate_sigma: float = 0.15
+    fully_differentiable: bool = False
+    tracking_position_weight: float = 1.0
+    tracking_attitude_weight: float = 0.2
+    tracking_velocity_weight: float = 0.05
+    tracking_angular_rate_weight: float = 0.02
+    tracking_action_smooth_weight: float = 1.0e-4
+    tracking_safety_weight: float = 1.0
 
 
 class DroneState(NamedTuple):
@@ -75,6 +86,83 @@ def smooth_safety_penalty(distance: torch.Tensor, warning_distance: float, tempe
     temperature = warning_distance * temperature_ratio
     normalizer = F.softplus(distance.new_tensor(warning_distance / temperature))
     return torch.square(F.softplus((warning_distance - distance) / temperature) / normalizer)
+
+
+def tracking_progress(last_position_error: torch.Tensor, position_error: torch.Tensor, norm: str) -> torch.Tensor:
+    if norm == "l2":
+        return torch.linalg.vector_norm(last_position_error, dim=-1) - torch.linalg.vector_norm(position_error, dim=-1)
+    return torch.sum(last_position_error.abs() - position_error.abs(), dim=-1)
+
+
+def closing_velocity(linear_velocity: torch.Tensor, position_error: torch.Tensor) -> torch.Tensor:
+    distance = torch.linalg.vector_norm(position_error, dim=-1).clamp_min(1e-6)
+    return (linear_velocity * position_error).sum(dim=-1) / distance
+
+
+def arrival_surrogate_bonus(distance: torch.Tensor, kind: str, sigma: float) -> torch.Tensor:
+    if kind == "gaussian":
+        return torch.exp(-torch.square(distance) / (2.0 * sigma * sigma))
+    if kind == "sigmoid":
+        return torch.sigmoid((0.1 - distance) / max(sigma, 1e-6))
+    return torch.zeros_like(distance)
+
+
+def attitude_error(quaternion: torch.Tensor, target_quaternion: torch.Tensor) -> torch.Tensor:
+    alignment = (quaternion * target_quaternion).sum(dim=-1)
+    return 1.0 - alignment * alignment
+
+
+def tracking_safety_penalty(
+    position: torch.Tensor,
+    position_error: torch.Tensor,
+    config: TrackDiffEnvConfig,
+) -> torch.Tensor:
+    ratio = config.safety_temperature_ratio
+    return (
+        smooth_safety_penalty(position[:, 2], config.ground_warning_distance, ratio)
+        + smooth_safety_penalty(
+            config.horizontal_termination_error - position_error[:, 0].abs(),
+            config.horizontal_warning_distance,
+            ratio,
+        )
+        + smooth_safety_penalty(
+            config.horizontal_termination_error - position_error[:, 1].abs(),
+            config.horizontal_warning_distance,
+            ratio,
+        )
+        + smooth_safety_penalty(
+            config.vertical_termination_error - position_error[:, 2].abs(),
+            config.vertical_warning_distance,
+            ratio,
+        )
+    )
+
+
+def differentiable_tracking_reward(
+    position: torch.Tensor,
+    target_position: torch.Tensor,
+    linear_velocity: torch.Tensor,
+    quaternion: torch.Tensor,
+    target_quaternion: torch.Tensor,
+    angular_velocity: torch.Tensor,
+    action: torch.Tensor,
+    last_action: torch.Tensor,
+    safety_penalty: torch.Tensor,
+    config: TrackDiffEnvConfig,
+) -> torch.Tensor:
+    # ponytail: static hover refs v*=0, w*=0, q*=identity. Time-indexed trajectory when Racing needs it.
+    position_term = torch.sum(torch.square(position - target_position), dim=-1)
+    velocity_term = torch.sum(torch.square(linear_velocity), dim=-1)
+    rate_term = torch.sum(torch.square(angular_velocity), dim=-1)
+    smooth_term = torch.sum(torch.square(action - last_action), dim=-1)
+    return -(
+        config.tracking_position_weight * position_term
+        + config.tracking_velocity_weight * velocity_term
+        + config.tracking_attitude_weight * attitude_error(quaternion, target_quaternion)
+        + config.tracking_angular_rate_weight * rate_term
+        + config.tracking_action_smooth_weight * smooth_term
+        + config.tracking_safety_weight * safety_penalty
+    )
 
 
 def quaternion_to_roll_pitch_yaw(quaternion: torch.Tensor) -> torch.Tensor:
@@ -408,7 +496,15 @@ class TrackDiffEnv:
             is_alive_before[:, None], state.angular_velocity_body, torch.zeros_like(state.angular_velocity_body)
         )
         target_reward = -torch.sum(torch.square(position_error), dim=-1) * 0.1
-        target_reward = target_reward + torch.sum(last_position_error.abs() - position_error.abs(), dim=-1)
+        target_reward = target_reward + tracking_progress(
+            last_position_error, position_error, self.config.progress_norm
+        )
+        target_reward = target_reward + self.config.closing_velocity_weight * closing_velocity(
+            state.linear_velocity, position_error
+        )
+        target_reward = target_reward + arrival_surrogate_bonus(
+            distance, self.config.arrival_surrogate, self.config.arrival_surrogate_sigma
+        )
         smooth_reward = torch.linalg.vector_norm(action[:, :3] - self.last_action[:, :3], dim=-1)
         smooth_reward = smooth_reward + (action[:, 3] - self.last_action[:, 3]).abs() * 5.0
         yaw_reward = torch.exp(self.config.yaw_lambda * body_euler[:, 2].abs()) - 1.0
@@ -436,18 +532,35 @@ class TrackDiffEnv:
             is_crashed = is_crashed | (vertical_distance < 0.0)
         is_newly_dead = is_alive_before & is_crashed
         is_arrived = is_alive_before & ~is_newly_dead & (distance < self.config.target_threshold)
-        target_reward = target_reward + 20.0 * is_arrived.to(dtype=target_reward.dtype)
         crash_reward = is_newly_dead.to(dtype=target_reward.dtype)
-
         scales = self.config.reward_scales
         step_scale = self.config.dt
-        reward = (
-            scales.target * target_reward
-            + scales.smooth * smooth_reward
-            + scales.yaw * yaw_reward
-            + scales.angular * angular_reward
-            + scales.crash * crash_reward
-        ) * step_scale
+        if self.config.fully_differentiable:
+            hover_quaternion = quaternion.new_tensor([1.0, 0.0, 0.0, 0.0]).expand_as(quaternion)
+            reward = (
+                differentiable_tracking_reward(
+                    state.position,
+                    self.target_position,
+                    state.linear_velocity,
+                    quaternion,
+                    hover_quaternion,
+                    state.angular_velocity_body,
+                    action,
+                    self.last_action,
+                    tracking_safety_penalty(state.position, position_error, self.config),
+                    self.config,
+                )
+                * step_scale
+            )
+        else:
+            target_reward = target_reward + 20.0 * is_arrived.to(dtype=target_reward.dtype)
+            reward = (
+                scales.target * target_reward
+                + scales.smooth * smooth_reward
+                + scales.yaw * yaw_reward
+                + scales.angular * angular_reward
+                + scales.crash * crash_reward
+            ) * step_scale
         reward = torch.where(is_alive_before, reward, torch.zeros_like(reward))
         physics_loss = -reward
         policy_loss = (self.config.action_delta_weight * torch.sum(torch.square(action - self.last_action), dim=-1)) * (
@@ -456,7 +569,8 @@ class TrackDiffEnv:
 
         self.episode_step += 1
         self.episode_length_buf += is_alive_before.to(dtype=self.episode_length_buf.dtype)
-        self.waypoint_count += is_arrived
+        newly_arrived = is_arrived & (self.first_arrival_step == self.config.max_episode_steps)
+        self.waypoint_count += newly_arrived if self.config.fully_differentiable else is_arrived
         self.first_arrival_step = torch.where(
             is_arrived & (self.first_arrival_step == self.config.max_episode_steps),
             torch.full_like(self.first_arrival_step, self.episode_step),
@@ -469,17 +583,18 @@ class TrackDiffEnv:
         self.position_error_steps += is_alive_before
         self.is_alive = is_alive_before & ~is_newly_dead
 
-        if self.waypoint_sequences is None:
-            next_target = self.target_lower + (self.target_upper - self.target_lower) * torch.rand(
-                (self.num_envs, 3), device=self.device, dtype=gs.tc_float
-            )
-            self.target_position = torch.where(is_arrived[:, None], next_target, self.target_position)
-        else:
-            self.waypoint_index = torch.clamp(
-                self.waypoint_index + is_arrived,
-                max=self.waypoint_sequences.shape[1] - 1,
-            )
-            self.target_position = self.waypoint_sequences[self.envs_idx, self.waypoint_index]
+        if not self.config.fully_differentiable:
+            if self.waypoint_sequences is None:
+                next_target = self.target_lower + (self.target_upper - self.target_lower) * torch.rand(
+                    (self.num_envs, 3), device=self.device, dtype=gs.tc_float
+                )
+                self.target_position = torch.where(is_arrived[:, None], next_target, self.target_position)
+            else:
+                self.waypoint_index = torch.clamp(
+                    self.waypoint_index + is_arrived,
+                    max=self.waypoint_sequences.shape[1] - 1,
+                )
+                self.target_position = self.waypoint_sequences[self.envs_idx, self.waypoint_index]
 
         self._sync_target_visual()
         self.last_action = torch.where(self.is_alive[:, None], action, torch.zeros_like(action))

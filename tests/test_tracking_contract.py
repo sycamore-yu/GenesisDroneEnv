@@ -128,6 +128,24 @@ def test_crash_conditions_follow_configured_limits():
     assert dones.all()
 
 
+def test_fully_differentiable_ppo_keeps_command_and_skips_arrival_bonus():
+    device = _ensure_genesis()
+    task = _fake_task(
+        device,
+        fully_differentiable=True,
+        command_cfg={"pos_x_range": [0.0, 0.0], "pos_y_range": [0.0, 0.0], "pos_z_range": [0.6, 0.6]},
+        termination_if_z_greater_than=5.0,
+    )
+    task.reset()
+    command = task.command_buf.clone()
+    task.genesis_env.drone.odom.world_pos[:] = command
+    task.genesis_env.drone.odom.last_world_pos[:] = command
+    _, reward, _, _ = task.step(torch.zeros((2, 4), device=device))
+    assert torch.allclose(task.command_buf, command)
+    arrival_bonus = 20.0 * 10.0 * 0.01
+    assert float(reward.max()) < 0.25 * arrival_bonus
+
+
 def test_mixer_produces_hover_rpm_at_hover_action():
     controller = PIDcontroller.__new__(PIDcontroller)
     controller.TWR = THRUST_TO_WEIGHT_RATIO

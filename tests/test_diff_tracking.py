@@ -12,8 +12,8 @@ from genesis_drones.algorithms.diff_rl import (
     as_simulation_action,
     collect_simulation_action_gradients,
 )
-from genesis_drones.envs.track_diff_env import TrackDiffEnv, TrackDiffEnvConfig, smooth_safety_penalty
-from genesis_drones.evaluation.track_diff import TrackScenarios, classify_eval_step, evaluate_diff_policy
+from genesis_drones.envs.track_diff_env import TrackDiffEnv, TrackDiffEnvConfig, smooth_safety_penalty, tracking_progress, closing_velocity, arrival_surrogate_bonus
+from genesis_drones.evaluation.track_diff import TrackScenarios, classify_eval_step, evaluate_diff_policy, make_diff_observation
 
 
 def _ensure_genesis():
@@ -44,8 +44,98 @@ def test_diff_tracking_math_contracts():
     torch.testing.assert_close(action[:, 3], torch.tensor([hover_action]))
     torch.testing.assert_close(action[:, :3], torch.zeros((1, 3)))
 
+    last_error = torch.tensor([[1.0, 0.0, 0.0], [1.0, 1.0, 0.0]])
+    error = torch.tensor([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    torch.testing.assert_close(tracking_progress(last_error, error, "l1"), torch.tensor([1.0, 1.0]))
+    torch.testing.assert_close(tracking_progress(last_error, error, "l2"), torch.tensor([1.0, torch.sqrt(torch.tensor(2.0)) - 1.0]))
+    error_toward = torch.tensor([[1.0, 0.0, 0.0]])
+    velocity = torch.tensor([[2.0, 0.0, 0.0]])
+    torch.testing.assert_close(closing_velocity(velocity, error_toward), torch.tensor([2.0]))
+    gauss_distance = torch.tensor([0.0, 0.1, 1.0], requires_grad=True)
+    gauss = arrival_surrogate_bonus(gauss_distance, "gaussian", 0.15)
+    assert gauss[0] > gauss[1] > gauss[2]
+    gauss.sum().backward()
+    assert gauss_distance.grad is not None
+    from genesis_drones.envs.track_diff_env import quaternion_to_roll_pitch_yaw
 
-def test_fixed_scenarios_are_reproducible():
+    identity_euler = quaternion_to_roll_pitch_yaw(torch.tensor([[1.0, 0.0, 0.0, 0.0]]))
+    torch.testing.assert_close(identity_euler, torch.zeros(1, 3))
+
+
+def test_differentiable_tracking_reward_has_nonzero_gradients():
+    from genesis_drones.envs.track_diff_env import attitude_error, differentiable_tracking_reward
+
+    config = TrackDiffEnvConfig()
+    position = torch.tensor([[0.3, 0.0, 0.6]], requires_grad=True)
+    quaternion = torch.tensor([[0.98, 0.1, 0.0, 0.0]], requires_grad=True)
+    quaternion = quaternion / torch.linalg.vector_norm(quaternion, dim=-1, keepdim=True)
+    quaternion = quaternion.detach().requires_grad_(True)
+    linear_velocity = torch.tensor([[0.4, 0.0, 0.0]], requires_grad=True)
+    angular_velocity = torch.tensor([[0.0, 0.2, 0.0]], requires_grad=True)
+    target = torch.tensor([[0.0, 0.0, 0.6]])
+    hover = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    action = torch.zeros((1, 4))
+    reward = differentiable_tracking_reward(
+        position, target, linear_velocity, quaternion, hover, angular_velocity, action, action, torch.zeros(1), config
+    )
+    reward.sum().backward()
+    assert position.grad.norm() > 0
+    assert quaternion.grad.norm() > 0
+    assert linear_velocity.grad.norm() > 0
+    assert angular_velocity.grad.norm() > 0
+    torch.testing.assert_close(attitude_error(hover, hover), torch.tensor([0.0]))
+
+    distance = torch.tensor([0.101, 0.099], requires_grad=True)
+    arrival_bonus = 20.0 * (distance < 0.1).to(distance.dtype)
+    assert arrival_bonus.tolist() == [0.0, 20.0]
+    assert arrival_bonus.grad_fn is None
+
+
+def test_diff_observation_applies_training_scales():
+    from genesis_drones.envs.track_diff_env import TrackDiffEnvConfig
+
+    config = TrackDiffEnvConfig()
+    position = torch.tensor([[1.0, 2.0, 0.6]])
+    target = torch.tensor([[4.0, 5.0, 0.9]])
+    quaternion = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    linear_velocity = torch.tensor([[0.3, 0.0, 0.0]])
+    angular_velocity = torch.tensor([[0.0, 0.0, 3.14159]])
+    last_action = torch.zeros((1, 4))
+    observation = make_diff_observation(
+        position,
+        target,
+        quaternion,
+        linear_velocity,
+        angular_velocity,
+        last_action,
+        torch.tensor([True]),
+        config,
+    )
+    assert observation.shape == (1, TrackDiffEnv.observation_dim)
+    torch.testing.assert_close(
+        observation[0, 6:9],
+        (target - position)[0] * config.obs_scale_position_error,
+    )
+    torch.testing.assert_close(
+        observation[0, 13:16],
+        linear_velocity[0] * config.obs_scale_linear_velocity,
+    )
+    torch.testing.assert_close(
+        observation[0, 16:19],
+        angular_velocity[0] * config.obs_scale_angular_velocity,
+    )
+    dead = make_diff_observation(
+        position,
+        target,
+        quaternion,
+        linear_velocity,
+        angular_velocity,
+        last_action,
+        torch.tensor([False]),
+        config,
+    )
+    torch.testing.assert_close(dead, torch.zeros_like(dead))
+
     config = TrackDiffEnvConfig()
     first = TrackScenarios.generate(4, 8, config, seed=123)
     second = TrackScenarios.generate(4, 8, config, seed=123)
@@ -273,5 +363,32 @@ def test_pid_hover_and_ppo_style_arrival_reward():
         )
         rolled_thrust, _ = environment.mix_action(roll_action)
         assert rolled_thrust[0].max() - rolled_thrust[0].min() > 1e-4
+    finally:
+        environment.scene.reset()
+
+
+def test_fully_differentiable_mode_keeps_target_and_drops_arrival_bonus():
+    _ensure_genesis()
+    environment = TrackDiffEnv(
+        TrackDiffEnvConfig(horizon=1, fully_differentiable=True), 1, requires_grad=False
+    )
+    try:
+        hover = 2.0 / environment.config.thrust_to_weight_ratio - 1.0
+        environment.reset(
+            torch.tensor([[0.0, 0.0, 0.6]]),
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.tensor([[[0.0, 0.0, 0.6], [0.4, 0.0, 0.8]]]),
+        )
+        target_before = environment.target_position.clone()
+        hover_action = torch.tensor([[0.0, 0.0, 0.0, hover]], device=environment.device)
+        _, (_, _, reward), _, extras = environment.step(hover_action)
+        assert bool(extras["arrived"][0])
+        torch.testing.assert_close(environment.target_position, target_before)
+        arrival_bonus = 20.0 * environment.config.reward_scales.target * environment.config.dt
+        assert float(reward[0]) < 0.25 * arrival_bonus
+        assert int(environment.waypoint_count[0]) == 1
+        _, _, _, extras = environment.step(hover_action)
+        assert int(environment.waypoint_count[0]) == 1
+        torch.testing.assert_close(environment.target_position, target_before)
     finally:
         environment.scene.reset()

@@ -91,6 +91,17 @@ def build_track_diff_settings(data: dict, project_root: Path) -> TrackDiffSettin
             crash=reward_data["crash"],
             velocity=reward_data.get("velocity", 0.0),
         ),
+        progress_norm=environment_data.get("progress_norm", "l1"),
+        closing_velocity_weight=environment_data.get("closing_velocity_weight", 0.0),
+        arrival_surrogate=environment_data.get("arrival_surrogate", "none"),
+        arrival_surrogate_sigma=environment_data.get("arrival_surrogate_sigma", 0.15),
+        fully_differentiable=environment_data.get("fully_differentiable", False),
+        tracking_position_weight=environment_data.get("tracking_position_weight", 1.0),
+        tracking_attitude_weight=environment_data.get("tracking_attitude_weight", 0.2),
+        tracking_velocity_weight=environment_data.get("tracking_velocity_weight", 0.05),
+        tracking_angular_rate_weight=environment_data.get("tracking_angular_rate_weight", 0.02),
+        tracking_action_smooth_weight=environment_data.get("tracking_action_smooth_weight", 1.0e-4),
+        tracking_safety_weight=environment_data.get("tracking_safety_weight", 1.0),
     )
     return TrackDiffSettings(
         raw=data,

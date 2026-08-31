@@ -89,6 +89,33 @@ class EvaluationSummary:
         return asdict(self)
 
 
+def make_diff_observation(
+    position: torch.Tensor,
+    target: torch.Tensor,
+    quaternion: torch.Tensor,
+    linear_velocity: torch.Tensor,
+    angular_velocity_body: torch.Tensor,
+    last_action: torch.Tensor,
+    is_alive: torch.Tensor,
+    config: TrackDiffEnvConfig,
+) -> torch.Tensor:
+    """DiffRL training observation. Keep this layout for old checkpoints."""
+    position_error = (target - position) * config.obs_scale_position_error
+    observation = torch.cat(
+        (
+            position,
+            target,
+            position_error,
+            quaternion,
+            linear_velocity * config.obs_scale_linear_velocity,
+            angular_velocity_body * config.obs_scale_angular_velocity,
+            last_action,
+        ),
+        dim=-1,
+    )
+    return torch.where(is_alive[:, None], observation, torch.zeros_like(observation))
+
+
 def classify_eval_step(
     is_alive: torch.Tensor,
     position: torch.Tensor,

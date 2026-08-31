@@ -43,3 +43,17 @@ This project is indexed by GitNexus as **GenesisDroneEnv** (210 symbols, 404 rel
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Agent skills（智能体技能）
+
+### Issue tracker（工单系统）
+
+规格和工单保存在本地 Markdown（标记文本）文件中。规则见 `docs/agents/issue-tracker.md`。
+
+### Triage labels（分诊状态）
+
+工单使用默认的五种分诊状态。规则见 `docs/agents/triage-labels.md`。
+
+### Domain docs（领域文档）
+
+本项目使用单上下文布局。规则见 `docs/agents/domain.md`。
