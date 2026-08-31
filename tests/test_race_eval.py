@@ -40,5 +40,5 @@ def test_ppo_task_exposes_observation_groups_timeouts_and_discount():
     hover[:, 1:] = 0.0
     _, _, done, extras = task.step(hover)
     assert "time_outs" in extras
-    assert extras["log"]["/gamma"].item() == pytest.approx(0.999, rel=0, abs=1e-5)
-    assert extras["log"]["/lambda"].item() == pytest.approx(0.95, rel=0, abs=1e-5)
+    assert train_config["algorithm"]["gamma"] == pytest.approx(0.999, rel=0, abs=1e-5)
+    assert train_config["algorithm"]["lam"] == pytest.approx(0.95, rel=0, abs=1e-5)

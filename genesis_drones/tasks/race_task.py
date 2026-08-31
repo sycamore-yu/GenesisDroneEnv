@@ -26,17 +26,7 @@ class RaceTask(VecEnv):
         policy, (_, _, reward), done, extras = self.environment.step(actions)
         self.policy_observation = policy
         self.critic_observation = extras["critic_observation_live"]
-        extras_out = {
-            "time_outs": extras["truncated"],
-            "log": {
-                "/gate_index": extras["gate_index"].to(dtype=reward.dtype),
-                "/passed": extras["passed"].to(dtype=reward.dtype),
-                "/completed": extras["completed"].to(dtype=reward.dtype),
-                "/analytic_collision": extras["analytic_collision"].to(dtype=reward.dtype),
-                "/gamma": torch.tensor(self.environment.config.gamma, device=self.device),
-                "/lambda": torch.tensor(self.environment.config.td_lambda, device=self.device),
-            },
-        }
+        extras_out = {"time_outs": extras["truncated"]}
         return self.get_observations(), reward, done, extras_out
 
     def reset(self):
