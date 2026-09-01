@@ -1,194 +1,250 @@
 <div align="center">
 
-# 🚁 Genesis Drone Env
+# 🚁 Differentiable UAV Policy Learning in Genesis
 
-**High-Fidelity Drone Simulation Environment based on [Genesis](https://github.com/Genesis-Embodied-AI/Genesis)**
+**Analytic-gradient policy learning for quadrotor control with differentiable simulation**
 
-[**Documentation**](https://genesis-world.readthedocs.io/en/latest/user_guide/getting_started/hover_env.html) | [**Genesis Engine**](https://github.com/Genesis-Embodied-AI/Genesis)
-
----
-
-<p align="center">
-  <a href="#-features">Features</a> •
-  <a href="#-installation">Installation</a> •
-  <a href="#-demos--usage">Demos</a> •
-  <a href="#-hardware-in-the-loop-fpv">FPV Hardware</a> •
-  <a href="#-citation">Citation</a>
-</p>
+[Wiki](.gitnexus/wiki/index.html) ·
+[Roadmap](docs/roadmaps/autonomous-racing-and-avoidance.md)
 
 </div>
 
-## 📖 Introduction
+---
 
-**Genesis Drone Env** provides a robust playground for drone research, ranging from Reinforcement Learning (RL) to classical Geometric Control. Included in the **official** [Genesis](https://github.com/Genesis-Embodied-AI/Genesis) ecosystem, this repository serves as a foundation for developing complex aerial robotics algorithms.
+## 📖 Overview
 
-## 🔖 Related Work (Our Work)
+This repository extends **GenesisDroneEnv** with differentiable policy learning for quadrotors.
 
-1. [FLARE: Agile Flights for Quadrotor Cable-Suspended Payload Systems via Reinforcement Learning](https://arxiv.org/abs/2508.09797) (Accepted by **IEEE RA-L**) ([Github Code](https://github.com/BEI11HAI/Flare))
+Instead of relying solely on model-free policy-gradient estimators, **APG** and **SHAC** exploit gradients through the Genesis dynamics to directly optimize UAV control policies.
 
-### ✨ Features
-- **🚀 Reinforcement Learning**: Ready-to-use environments for training tracking policies (PPO included).
-- **📐 Geometric Control**: Concise implementation of SO(3)/SE(3) controllers for precise trajectory tracking.
-- **🎮 Hardware-in-the-Loop (HIL)**: Connect your real RC transmitter via Flight Controller (FCU) to fly FPV in the simulator.
-- **⚙️ Highly Configurable**: Easy tuning of flight parameters, physics settings, and reward functions via YAML.
+Current status:
+
+- ✅ Waypoint and track-following
+- 🚧 Multi-gate drone racing
+- 🧭 LiDAR-based dynamic obstacle avoidance
+
+> **Status:** Research prototype / work in progress.
 
 ---
 
-## 💻 Installation
+## ✨ Highlights
 
-It is recommended to use a virtual environment (conda) to manage dependencies.
-
-```bash
-# 1. Create environment
-conda create -n genesis_drone python=3.11 # Requires Python >= 3.10
-conda activate genesis_drone
-
-# 2. Install Genesis (Ensure you have the latest version)
-# Visit https://github.com/Genesis-Embodied-AI/Genesis for detailed instructions
-
-# 3. Clone and install this repository
-git clone https://github.com/KafuuChikai/GenesisDroneEnv.git
-cd GenesisDroneEnv
-pip install -e .
-```
+- **Differentiable UAV dynamics** — gradients propagate through Genesis from task losses to policy actions.
+- **APG & SHAC** — analytic-gradient policy learning with full- and short-horizon differentiation.
+- **Unified CTBR interface** — collective thrust and body-rate control across tracking and racing tasks.
+- **Evaluation tools** — gradient checks, convergence plots, PPO/APG/SHAC comparison, and parallel-environment benchmarks.
+- **Racing & avoidance extensions** — fixed multi-gate racing environments and a roadmap toward LiDAR-based dynamic avoidance.
 
 ---
 
-## 🎬 Demos & Usage
+## 🎬 Quick Start
 
-### 1. RL Tracking Task
-Train or evaluate a policy for sequential random stationary waypoints.
+### APG / SHAC Tracking
 
-#### Evaluate Pretrained Model:
-```bash
-python scripts/eval/track_eval.py
-```
-<div align="center"> <img src="docs/quick.gif" alt="RL Tracking" width="80%"/> </div>
-
-#### Train Your Own Policy:
-```bash
-python scripts/train/track_train.py 
-```
-
-> **Note:** Training typically converges around the 200th step. You can fine-tune the reward scale in `rl_env.yaml`.
-
-### 2. Differentiable RL Tracking
-Validate the motor allocation and Genesis gradients before training:
-```bash
-python scripts/eval/track_diff_gradcheck.py
-```
-
-Measure the stable parallel environment count for each algorithm:
-```bash
-python scripts/eval/track_diff_benchmark.py --algo apg --num-envs 1024
-python scripts/eval/track_diff_benchmark.py --algo shac --num-envs 1024
-```
-
-Train Adaptive Policy Gradient (APG) or Short-Horizon Actor-Critic (SHAC). Default length is 300 updates:
 ```bash
 python scripts/train/track_diff_train.py --algo apg --updates 300
 python scripts/train/track_diff_train.py --algo shac --updates 300
 ```
 
-Use one command to pair a differentiable environment with an algorithm:
+### Racing
+
+```bash
+python scripts/train/race_train.py --algo ppo
+python scripts/train/race_train.py --algo apg
+python scripts/train/race_train.py --algo shac
+```
+
+### Unified Entry Point
+
 ```bash
 python scripts/train/diff_train.py track --algo apg
-python scripts/train/diff_train.py track --algo shac
-python scripts/train/diff_train.py race --algo apg
 python scripts/train/diff_train.py race --algo shac
 ```
-New environments register one training runner in `diff_train.py`. New algorithms register once in `DIFF_ALGORITHMS`.
 
-Run a predefined experiment plan from one entry point:
+### Numerical Validation
+
 ```bash
-python scripts/train/track_diff_experiments.py horizon
-python scripts/train/track_diff_experiments.py objective
-python scripts/train/track_diff_experiments.py fully-differentiable
-python scripts/train/track_diff_experiments.py remaining
+python scripts/eval/track_diff_gradcheck.py
+python scripts/eval/track_diff_terminal_value_gradcheck.py
+python scripts/eval/track_diff_benchmark.py --algo apg --num-envs 1024
 ```
-Add `--dry-run` to print the commands without starting training.
-
-Plot PPO, APG, and SHAC train reward and loss against wall-clock time:
-```bash
-python scripts/eval/plot_track_diff_convergence.py
-```
-
-Compare the best APG and SHAC checkpoints with the existing PPO policy on the shared test scenarios:
-```bash
-python scripts/eval/track_diff_eval.py \
-  --apg-checkpoint logs/track_diff/apg_RUN/best.pt \
-  --shac-checkpoint logs/track_diff/shac_RUN/best.pt \
-  --output-dir logs/track_diff/evaluation
-```
-
-The differentiable environment returns `obs, (physics_loss, policy_loss, reward), done, extras`. APG and SHAC send
-state-derived `physics_loss` through Genesis, then backpropagate direct Actor regularization in `policy_loss` with
-ordinary PyTorch. Detached `reward` and task metrics are used for logging and evaluation.
-
-The implementations adapted from DiffAero retain their BSD 3-Clause notice in `THIRD_PARTY_NOTICES`.
-
-### 3. SE(3) Geometric Controller
-Replace the neural network with a classical geometric controller for precise maneuvers.
-
-#### Run Trajectory Tracking:
-```bash
-python scripts/eval/se3_controller_eval.py --use-trajectory
-```
-
-> **Tips:**
-> - `--use-trajectory`: Enables circle trajectory tracking.
-> - Without the flag, it defaults to Waypoint Mode.
-
-The controller implements the framework proposed in:
-- [Geometric tracking control of a quadrotor UAV on SE(3)](https://ieeexplore.ieee.org/document/5717652)
-- [Control of Quadrotors Using the Hopf Fibration on SO(3)](https://link.springer.com/chapter/10.1007/978-3-030-28619-4_20)
-
-### 4. 🎮 Hardware-in-the-Loop (FPV)
-Fly the simulated drone using your real Radio Controller (RC) via a Flight Controller (FCU) bridge.
-
-<div align="center"> <img src="docs/FPV.gif" alt="FPV Flight" width="80%"/> </div>
-
-**Hardware Setup**
-
-<div align="center"> <img src="./docs/hardware.png" alt="Hardware Connection" width="80%" /> </div>
-
-1. **Prepare FCU**: Use an **STM32H743** FCU.
-2. **Flash Firmware**: Flash the custom HEX file: [betaflight_4.4.0_STM32H743_forRC](genesis_drones/utils/BF_firmware_forRC/betaflight_4.4.0_STM32H743_forRC.hex)
-3. **Connect**:
-   - Power the FCU via USB-C.
-   - Connect the FCU's UART port to your PC using a **USB-to-TTL** module.
-
-**Software Configuration**
-
-1. Check your serial port ID (e.g., `/dev/ttyUSB0`) using:
-```bash
-ls /dev/tty*
-```
-
-2. Update the `USB_path` parameter in flight.yaml (or relevant config) to match your port.
-
-**Run FPV Mode**
-```bash
-python scripts/eval/rc_FPV_eval.py
-```
-
-## 🛠 Configuration
-
-Customize the simulation to fit your needs by editing the YAML files in the `config/` directory:
-
-| Config Type | File Path | Description |
-| :--- | :--- | :--- |
-| **Flight Dynamics** | `config/*/flight.yaml` | PID gains, physical properties (mass, inertia). |
-| **Environment** | `config/*/genesis_env.yaml` | Physics engine settings, rendering, scene setup. |
-| **RL Hyperparams** | `config/*/rl_env.yaml` | Reward functions, observation space, training steps. |
-| **Differentiable RL** | `config/track_diff/train.yaml` | APG, SHAC, loss, safety, and evaluation settings. |
 
 ---
 
-## 🤝 Acknowledgement
+## 🔁 Differentiable Training Loop
 
-This repository is inspired by the following ground-breaking work:
+```text
+Policy πθ
+   │
+   ▼
+Action
+   │
+   ▼
+Genesis Differentiable Dynamics
+   │
+   ▼
+State / Task Loss
+   │
+   └──────── simulation gradient ────────► πθ
+```
 
-> [**Champion-level drone racing using deep reinforcement learning**](https://www.nature.com/articles/s41586-023-06419-4.pdf) (Nature 2023)
+The simulator computes gradients with respect to the executed actions, which are propagated back to the policy parameters through the actor computation graph.
 
-We acknowledge the contributions of the open-source community that make this project possible.
+**APG** differentiates directly through the rollout dynamics.
+
+**SHAC** limits backpropagation to short horizons and uses a critic to represent long-horizon value.
+
+---
+
+## 🛣️ Roadmap
+
+| Stage | Task                             | Status         |
+| ----- | -------------------------------- | -------------- |
+| I     | Waypoint / track following       | ✅ Validated    |
+| II    | Fixed multi-gate racing          | 🚧 In progress |
+| III   | Generalized racing               | 📋 Planned     |
+| IV    | LiDAR dynamic obstacle avoidance | 📋 Planned     |
+
+See [Roadmap](docs/roadmaps/autonomous-racing-and-avoidance.md) for details.
+
+---
+
+## 📚 References
+
+The implementation and research roadmap are primarily related to the following work:
+
+**[1] Analytic Policy Gradient**
+
+N. Wiedemann, V. Wüest, A. Loquercio, M. Müller, D. Floreano, and D. Scaramuzza,
+“Training Efficient Controllers via Analytic Policy Gradient,”
+*IEEE International Conference on Robotics and Automation (ICRA)*, 2023.
+arXiv:2209.13052.
+
+**[2] Short-Horizon Actor-Critic**
+
+J. Xu, V. Makoviychuk, Y. Narang, F. Ramos, W. Matusik, A. Garg, and M. Macklin,
+“Accelerated Policy Learning with Parallel Differentiable Simulation,”
+*International Conference on Learning Representations (ICLR)*, 2022.
+arXiv:2204.07137.
+
+**[3] DiffAero**
+
+X. Zhang, R. Wang, Y. Ren, J. Sun, H. Fang, J. Chen, and G. Wang,
+“DiffAero: A GPU-Accelerated Differentiable Simulation Framework for Efficient Quadrotor Policy Learning,”
+arXiv:2509.10247, 2025.
+
+**[4] DiffRacing**
+
+Y. Su, F. Yu, Y. Hu, X. Niu, L. Zhang, F. Sun, and D. Zou,
+“Vector Field Augmented Differentiable Policy Learning for Vision-Based Drone Racing,”
+arXiv:2603.08019, 2026.
+
+**[5] Dynamic Obstacle Avoidance**
+
+X. Fan, M. Lu, B. Xu, and P. Lu,
+“Flying in Highly Dynamic Environments With End-to-End Learning Approach,”
+*IEEE Robotics and Automation Letters*, vol. 10, no. 4, pp. 3851–3858, 2025.
+DOI: 10.1109/LRA.2025.3547306.
+
+**[6] Point-to-Motion**
+
+B. Xu, Z. Yan, M. Lu, X. Fan, Y. Luo, Y. Lin, Z. Chen, Y. Chen, Q. Qiao, and P. Lu,
+“Flow-Aided Flight Through Dynamic Clutters From Point to Motion,”
+*IEEE Robotics and Automation Letters*, vol. 11, no. 1, pp. 218–225, 2026.
+DOI: 10.1109/LRA.2025.3632608.
+
+**[7] Point-Cloud UAV Navigation**
+
+F. Gao, W. Wu, W. Gao, and S. Shen,
+“Flying on Point Clouds: Online Trajectory Generation and Autonomous Navigation for Quadrotors in Cluttered Environments,”
+*Journal of Field Robotics*, vol. 36, no. 4, pp. 710–733, 2019.
+DOI: 10.1002/rob.21842.
+
+<details>
+<summary><b>BibTeX</b></summary>
+
+```bibtex
+@inproceedings{wiedemann2023training,
+  title     = {Training Efficient Controllers via Analytic Policy Gradient},
+  author    = {Wiedemann, Nina and W{\"u}est, Valentin and Loquercio, Antonio
+               and M{\"u}ller, Matthias and Floreano, Dario and Scaramuzza, Davide},
+  booktitle = {IEEE International Conference on Robotics and Automation (ICRA)},
+  year      = {2023}
+}
+
+@inproceedings{xu2022accelerated,
+  title     = {Accelerated Policy Learning with Parallel Differentiable Simulation},
+  author    = {Xu, Jie and Makoviychuk, Viktor and Narang, Yashraj and Ramos, Fabio
+               and Matusik, Wojciech and Garg, Animesh and Macklin, Miles},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2022}
+}
+
+@misc{zhang2025diffaero,
+  title         = {DiffAero: A GPU-Accelerated Differentiable Simulation Framework
+                   for Efficient Quadrotor Policy Learning},
+  author        = {Zhang, Xinhong and Wang, Runqing and Ren, Yunfan and Sun, Jian
+                   and Fang, Hao and Chen, Jie and Wang, Gang},
+  year          = {2025},
+  eprint        = {2509.10247},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.RO}
+}
+
+@misc{su2026diffracing,
+  title         = {Vector Field Augmented Differentiable Policy Learning
+                   for Vision-Based Drone Racing},
+  author        = {Su, Yang and Yu, Feng and Hu, Yu and Niu, Xinze
+                   and Zhang, Linzuo and Sun, Fangyu and Zou, Danping},
+  year          = {2026},
+  eprint        = {2603.08019},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.RO}
+}
+
+@article{fan2025dynamic,
+  title   = {Flying in Highly Dynamic Environments With End-to-End Learning Approach},
+  author  = {Fan, Xiyu and Lu, Minghao and Xu, Bowen and Lu, Peng},
+  journal = {IEEE Robotics and Automation Letters},
+  volume  = {10},
+  number  = {4},
+  pages   = {3851--3858},
+  year    = {2025},
+  doi     = {10.1109/LRA.2025.3547306}
+}
+
+@article{xu2026p2m,
+  title   = {Flow-Aided Flight Through Dynamic Clutters From Point to Motion},
+  author  = {Xu, Bowen and Yan, Zexuan and Lu, Minghao and Fan, Xiyu
+             and Luo, Yi and Lin, Youshen and Chen, Zhiqiang and Chen, Yeke
+             and Qiao, Qiyuan and Lu, Peng},
+  journal = {IEEE Robotics and Automation Letters},
+  volume  = {11},
+  number  = {1},
+  pages   = {218--225},
+  year    = {2026},
+  doi     = {10.1109/LRA.2025.3632608}
+}
+
+@article{gao2019pointclouds,
+  title   = {Flying on Point Clouds: Online Trajectory Generation and
+             Autonomous Navigation for Quadrotors in Cluttered Environments},
+  author  = {Gao, Fei and Wu, William and Gao, Wenliang and Shen, Shaojie},
+  journal = {Journal of Field Robotics},
+  volume  = {36},
+  number  = {4},
+  pages   = {710--733},
+  year    = {2019},
+  doi     = {10.1002/rob.21842}
+}
+```
+
+</details>
+
+---
+
+## 🙏 Acknowledgements
+
+This project builds on **Genesis** and the upstream **GenesisDroneEnv** environment.
+
+The APG and SHAC implementations are informed by [1–3]. Adapted third-party components retain their original licenses; see `THIRD_PARTY_NOTICES`.
