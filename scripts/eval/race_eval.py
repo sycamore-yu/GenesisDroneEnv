@@ -107,11 +107,8 @@ def load_action_fn(args: argparse.Namespace, data: dict, environment: RaceEnv):
     task = RaceTask(environment, train_config)
     runner = OnPolicyRunner(task, train_config, str(args.checkpoint.parent), device=str(gs.device))
     runner.load(str(args.checkpoint))
-
-    def ppo_action(observation: torch.Tensor) -> torch.Tensor:
-        return runner.alg.act_inference(observation)
-
-    return ppo_action
+    policy = runner.get_inference_policy(device=str(gs.device))
+    return lambda observation: policy({"policy": observation})
 
 
 if __name__ == "__main__":
