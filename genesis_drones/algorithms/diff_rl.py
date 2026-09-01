@@ -395,6 +395,7 @@ class ShacAgent:
         previous_action = environment.last_action.detach()
         rollout = ShacRollout([], [], [], [], [], [], [])
         discount = observation.policy.new_ones(observation.policy.shape[0])
+        terminal_critic_observation = observation.critic
 
         for _ in range(steps):
             is_alive_before = environment.is_alive.clone()
@@ -422,6 +423,11 @@ class ShacAgent:
                 environment.spec.action_delta_weight,
                 discount=discount,
             )
+            terminal_critic_observation = torch.where(
+                is_alive_before[:, None],
+                transition.bootstrap_critic,
+                terminal_critic_observation,
+            )
             previous_action = action_actor
             entropy_sum = entropy_sum + (entropy * is_alive_before).sum()
             reward_sum = reward_sum + transition.reward.sum()
@@ -437,8 +443,9 @@ class ShacAgent:
             observation = transition.observation
             discount = discount * self.config.gamma
 
-        terminal_value = self.target_critic(observation.critic)
-        terminal_value = terminal_value * environment.is_alive.to(dtype=terminal_value.dtype)
+        terminated = torch.stack(rollout.terminated)
+        terminal_value = self.target_critic(terminal_critic_observation)
+        terminal_value = terminal_value * (~terminated.any(dim=0)).to(dtype=terminal_value.dtype)
         physics_actor_loss = physics_actor_loss + (terminal_value * discount).sum()
 
         denominator = tracked.sum().clamp_min(1) * steps
@@ -457,7 +464,6 @@ class ShacAgent:
         values = torch.stack(rollout.values)
         next_values = torch.stack(rollout.next_values)
         dones = torch.stack(rollout.dones)
-        terminated = torch.stack(rollout.terminated)
         valid = torch.stack(rollout.valid)
         with torch.no_grad():
             advantages = torch.zeros_like(losses)

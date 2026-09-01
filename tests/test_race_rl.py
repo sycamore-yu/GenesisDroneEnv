@@ -1,7 +1,7 @@
 import torch
 
-from genesis_drones.algorithms.diff_rl import ApgConfig, NetworkConfig, ShacConfig, make_diff_agent
-from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
+from genesis_drones.algorithms.diff_rl import ApgConfig, NetworkConfig, RunningNormalizer, ShacConfig, make_diff_agent
+from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig, RacingLossScales
 
 import genesis as gs
 
@@ -70,6 +70,29 @@ def test_shac_uses_diffaero_critic_initialization_and_optimizer_betas():
     )
     assert agent.actor_optimizer.defaults["betas"] == (0.9, 0.999)
     assert agent.critic_optimizer.defaults["betas"] == (0.9, 0.999)
+
+def test_shac_keeps_terminal_value_on_time_truncation():
+    device = _ensure_genesis()
+    environment = RaceEnv(
+        RaceEnvConfig(
+            horizon=1,
+            max_episode_steps=1,
+            loss_scales=RacingLossScales(0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+        num_envs=2,
+        requires_grad=True,
+    )
+    agent = make_diff_agent(
+        "shac",
+        environment.spec,
+        NetworkConfig(),
+        ShacConfig(horizon=1, gamma=0.999, td_lambda=0.95),
+        device,
+    )
+    observation = environment.reset_diff(seed=6)
+    normalizer = RunningNormalizer(RaceEnv.policy_observation_dim).to(device)
+    _, stats = agent.update(environment, observation, normalizer)
+    assert stats.actor_grad_norm > 0.0
 
 
 def test_time_truncation_uses_critic_observation_from_before_reset():
