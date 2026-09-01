@@ -86,19 +86,13 @@ def train_diff(args: argparse.Namespace, data: dict, log_dir: Path) -> None:
     environment = make_env(data, num_envs, requires_grad=True)
     network = NetworkConfig(hidden_sizes=tuple(data["network"]["hidden_sizes"]))
     policy_normalizer = RunningNormalizer(RaceEnv.policy_observation_dim).to(gs.device)
-    critic_normalizer = RunningNormalizer(RaceEnv.critic_observation_dim).to(gs.device)
     algorithm_config = build_diff_algorithm_config(args.algo, data[args.algo])
     agent = make_diff_agent(args.algo, environment.spec, network, algorithm_config, gs.device)
     observation = environment.reset_diff(seed=data["seed"])
     writer = SummaryWriter(log_dir)
     updates = data["updates"] if args.updates is None else args.updates
     for update in range(1, updates + 1):
-        observation, stats = agent.update(
-            environment,
-            observation,
-            policy_normalizer,
-            critic_normalizer,
-        )
+        observation, stats = agent.update(environment, observation, policy_normalizer)
         writer.add_scalar("loss/actor", stats.actor_loss, update)
         writer.add_scalar("reward/mean", stats.mean_reward, update)
         writer.add_scalar("train/gamma", environment.config.gamma, update)
@@ -111,7 +105,6 @@ def train_diff(args: argparse.Namespace, data: dict, log_dir: Path) -> None:
                     "legacy": False,
                     "agent": agent.state_dict(),
                     "policy_normalizer": policy_normalizer.state_dict(),
-                    "critic_normalizer": critic_normalizer.state_dict(),
                     "config": data,
                     "update": update,
                 },

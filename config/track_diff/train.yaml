@@ -53,4 +53,3 @@ shac:
   target_update_rate: 0.005
   log_standard_deviation_min: -5.0
   log_standard_deviation_max: -1.0
-  use_terminal_value: true

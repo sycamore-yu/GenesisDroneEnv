@@ -108,7 +108,6 @@ class RaceEnv:
             action_dim=cls.action_dim,
             horizon=config.horizon,
             nominal_action=(hover_action, 0.0, 0.0, 0.0),
-            terminal_value_uses_target_critic=True,
         )
 
     def __init__(

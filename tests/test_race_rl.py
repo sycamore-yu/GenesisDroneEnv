@@ -46,6 +46,31 @@ def test_shac_target_critic_is_frozen_and_true_terminal_cost_is_zero():
     terminal_cost = cost.detach() * (1.0 - terminated)
     torch.testing.assert_close(terminal_cost, torch.zeros_like(terminal_cost))
 
+def test_shac_uses_diffaero_critic_initialization_and_optimizer_betas():
+    device = _ensure_genesis()
+    agent = make_diff_agent(
+        "shac",
+        RaceEnv.spec_from_config(RaceEnvConfig()),
+        NetworkConfig(),
+        ShacConfig(),
+        device,
+    )
+    first, second, output = agent.critic.network.layers
+    torch.testing.assert_close(
+        first.linear.weight.T @ first.linear.weight,
+        2.0 * torch.eye(first.linear.weight.shape[1], device=device),
+    )
+    torch.testing.assert_close(
+        second.linear.weight @ second.linear.weight.T,
+        2.0 * torch.eye(second.linear.weight.shape[0], device=device),
+    )
+    torch.testing.assert_close(
+        output.weight @ output.weight.T,
+        output.weight.new_full((1, 1), 0.0001),
+    )
+    assert agent.actor_optimizer.defaults["betas"] == (0.9, 0.999)
+    assert agent.critic_optimizer.defaults["betas"] == (0.9, 0.999)
+
 
 def test_time_truncation_uses_critic_observation_from_before_reset():
     _ensure_genesis()

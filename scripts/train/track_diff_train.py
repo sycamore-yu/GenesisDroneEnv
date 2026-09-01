@@ -43,11 +43,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int)
     parser.add_argument("--save-interval", type=int)
-    parser.add_argument(
-        "--no-terminal-value",
-        action="store_true",
-        help="SHAC-old: actor loss without γ^H V(s_H) bootstrap",
-    )
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--log-dir", type=Path)
     parser.add_argument(
@@ -101,11 +96,6 @@ def main() -> None:
         data["environment"] = {**data["environment"], "horizon": args.horizon}
         data[args.algo] = {**data[args.algo], "horizon": args.horizon}
         changed = True
-    if args.no_terminal_value:
-        if args.algo != "shac":
-            raise ValueError("--no-terminal-value requires --algo shac")
-        data["shac"] = {**data["shac"], "use_terminal_value": False}
-        changed = True
     if args.progress_norm is not None:
         data["environment"] = {**data["environment"], "progress_norm": args.progress_norm}
         changed = True
@@ -142,9 +132,6 @@ def main() -> None:
     )
     horizon = settings.environment.horizon
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    terminal_tag = ""
-    if args.algo == "shac":
-        terminal_tag = "_old" if not settings.shac.use_terminal_value else "_terminal"
     objective_tag = ""
     if settings.environment.progress_norm != "l1":
         objective_tag += f"_{settings.environment.progress_norm}"
@@ -154,7 +141,7 @@ def main() -> None:
         objective_tag += f"_{settings.environment.arrival_surrogate}"
     if settings.environment.fully_differentiable:
         objective_tag += "_fulldiff"
-    default_name = f"{args.algo}{terminal_tag}_H{horizon}{objective_tag}_s{settings.seed}_{timestamp}"
+    default_name = f"{args.algo}_H{horizon}{objective_tag}_s{settings.seed}_{timestamp}"
     log_dir = args.log_dir or settings.log_root / default_name
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -335,7 +322,6 @@ def main() -> None:
         "algorithm": args.algo,
         "seed": settings.seed,
         "horizon": horizon,
-        "use_terminal_value": getattr(settings.algorithms[args.algo], "use_terminal_value", None),
         "progress_norm": settings.environment.progress_norm,
         "closing_velocity_weight": settings.environment.closing_velocity_weight,
         "arrival_surrogate": settings.environment.arrival_surrogate,

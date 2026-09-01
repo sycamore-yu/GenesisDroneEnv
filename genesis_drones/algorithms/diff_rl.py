@@ -45,7 +45,6 @@ class ShacConfig:
     target_update_rate: float = 0.005
     log_standard_deviation_min: float = -5.0
     log_standard_deviation_max: float = -1.0
-    use_terminal_value: bool = True
 
 
 @dataclass(frozen=True)
@@ -246,6 +245,13 @@ class Critic(nn.Module):
     def __init__(self, observation_size: int, config: NetworkConfig):
         super().__init__()
         self.network = MultilayerPerceptron(observation_size, 1, config)
+        for layer in self.network.layers:
+            if isinstance(layer, NormedLinear):
+                nn.init.orthogonal_(layer.linear.weight, 2.0**0.5)
+                nn.init.zeros_(layer.linear.bias)
+            elif isinstance(layer, nn.Linear):
+                nn.init.orthogonal_(layer.weight, 0.01)
+                nn.init.zeros_(layer.bias)
 
     def forward(self, observation: torch.Tensor) -> torch.Tensor:
         return self.network(observation).squeeze(-1)
@@ -278,7 +284,6 @@ class ApgAgent:
         environment: DifferentiableEnvironment,
         observation: DiffObservation,
         normalizer: RunningNormalizer,
-        _critic_normalizer: RunningNormalizer | None = None,
     ) -> tuple[DiffObservation, UpdateStats]:
         steps = self.config.horizon
         if steps != environment.spec.horizon:
@@ -358,10 +363,10 @@ class ShacAgent:
         self.target_critic = deepcopy(self.critic)
         self.target_critic.requires_grad_(False)
         self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(), lr=config.actor_learning_rate, betas=(0.7, 0.95)
+            self.actor.parameters(), lr=config.actor_learning_rate, betas=(0.9, 0.999)
         )
         self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=config.critic_learning_rate, betas=(0.7, 0.95)
+            self.critic.parameters(), lr=config.critic_learning_rate, betas=(0.9, 0.999)
         )
         self.config = config
 
@@ -376,12 +381,10 @@ class ShacAgent:
         environment: DifferentiableEnvironment,
         observation: DiffObservation,
         normalizer: RunningNormalizer,
-        critic_normalizer: RunningNormalizer | None = None,
     ) -> tuple[DiffObservation, UpdateStats]:
         steps = self.config.horizon
         if steps != environment.spec.horizon:
             raise ValueError("algorithm horizon must match differentiable environment horizon")
-        critic_normalizer = normalizer if critic_normalizer is None else critic_normalizer
         tracked = environment.is_alive.clone()
         physics_actor_loss = observation.policy.new_zeros(())
         policy_actor_loss = observation.policy.new_zeros(())
@@ -396,10 +399,8 @@ class ShacAgent:
         for _ in range(steps):
             is_alive_before = environment.is_alive.clone()
             normalizer.update(observation.policy, is_alive_before)
-            if critic_normalizer is not normalizer:
-                critic_normalizer.update(observation.critic, is_alive_before)
             normalized_observation = normalizer(observation.policy.detach())
-            normalized_critic_observation = critic_normalizer(observation.critic.detach())
+            critic_observation = observation.critic
             if self.config.entropy_weight == 0.0:
                 action_actor = self.actor.deterministic(normalized_observation)
                 entropy = observation.policy.new_zeros(observation.policy.shape[0])
@@ -407,10 +408,10 @@ class ShacAgent:
                 action_actor, entropy = self.actor.sample(normalized_observation)
             action_sim = as_simulation_action(action_actor)
             with torch.no_grad():
-                value = self.critic(normalized_critic_observation)
+                value = self.critic(critic_observation.detach())
             transition = environment.step_diff(action_sim)
             with torch.no_grad():
-                bootstrap_critic = critic_normalizer(transition.bootstrap_critic).detach()
+                bootstrap_critic = transition.bootstrap_critic.detach()
                 next_value = self.target_critic(bootstrap_critic).clamp(-20.0, 20.0)
 
             physics_actor_loss = physics_actor_loss + (transition.physics_loss * discount).sum()
@@ -424,8 +425,8 @@ class ShacAgent:
             previous_action = action_actor
             entropy_sum = entropy_sum + (entropy * is_alive_before).sum()
             reward_sum = reward_sum + transition.reward.sum()
-            rollout.observations.append(normalized_critic_observation)
-            rollout.losses.append(transition.critic_cost)
+            rollout.observations.append(critic_observation.detach())
+            rollout.losses.append(transition.critic_cost / 10.0)
             rollout.values.append(value)
             rollout.next_values.append(next_value)
             rollout.dones.append(transition.done)
@@ -436,16 +437,9 @@ class ShacAgent:
             observation = transition.observation
             discount = discount * self.config.gamma
 
-        # Short-horizon SHAC: L_π = Σ γ^t L_t + γ^H V(s_H). Freeze critic weights so the
-        # actor optimizer cannot touch them, but keep ∂V/∂s_H through the observation.
-        if self.config.use_terminal_value:
-            for parameter in self.critic.parameters():
-                parameter.requires_grad_(False)
-            terminal_observation = critic_normalizer(observation.critic)
-            terminal_critic = self.target_critic if environment.spec.terminal_value_uses_target_critic else self.critic
-            terminal_value = terminal_critic(terminal_observation)
-            terminal_value = terminal_value * environment.is_alive.to(dtype=terminal_value.dtype)
-            physics_actor_loss = physics_actor_loss + (terminal_value * discount).sum()
+        terminal_value = self.target_critic(observation.critic)
+        terminal_value = terminal_value * environment.is_alive.to(dtype=terminal_value.dtype)
+        physics_actor_loss = physics_actor_loss + (terminal_value * discount).sum()
 
         denominator = tracked.sum().clamp_min(1) * steps
         physics_actor_loss = physics_actor_loss / denominator
@@ -458,9 +452,6 @@ class ShacAgent:
         apply_actor_action_gradients(actor_actions, action_gradients, policy_actor_loss)
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config.actor_max_grad_norm)
         self.actor_optimizer.step()
-        if self.config.use_terminal_value:
-            for parameter in self.critic.parameters():
-                parameter.requires_grad_(True)
 
         losses = torch.stack(rollout.losses)
         values = torch.stack(rollout.values)
