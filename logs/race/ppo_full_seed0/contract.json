@@ -1,0 +1,12 @@
+{
+  "algorithm": "ppo",
+  "track": "diffaero_racing",
+  "action": "ctbr",
+  "policy_observation_size": 13,
+  "critic_observation_size": 34,
+  "dt": 0.0333,
+  "max_episode_steps": 1201,
+  "controller": "ctbr",
+  "gamma": 0.99,
+  "td_lambda": 0.95
+}

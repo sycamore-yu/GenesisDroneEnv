@@ -1,0 +1,10 @@
+git_head=66f73cf63b3dddbdadcd88022865f2efdaf77c48
+git_dirty=true
+command=python scripts/train/race_train.py --algo ppo --seed 0 --log-dir logs/race/ppo_full_seed0
+config=config/race/train.yaml + config/race/ppo.yaml
+n_envs=1024
+updates=1000
+rollout=16
+seed=0
+oracle=/home/tong/tongworkspace/experiments/GenesisDroneEnv/diffaero_oracle/racing_quad_ppo_seed0
+upstream=291ea14

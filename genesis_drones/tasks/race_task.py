@@ -2,7 +2,7 @@ import torch
 from rsl_rl.env.vec_env import VecEnv
 from tensordict import TensorDict
 
-from genesis_drones.envs.race_env import RaceEnv
+from genesis_drones.envs.race_env import RaceEnv, detached_torch_tensor
 
 
 class RaceTask(VecEnv):
@@ -26,8 +26,23 @@ class RaceTask(VecEnv):
         policy, (_, _, reward), done, extras = self.environment.step(actions)
         self.policy_observation = policy
         self.critic_observation = extras["critic_observation_live"]
-        extras_out = {"time_outs": extras["truncated"]}
-        return self.get_observations(), reward, done, extras_out
+        extras_out = {"time_outs": detached_torch_tensor(extras["truncated"])}
+        if done.any():
+            reset = done.bool()
+            extras_out["episode"] = {
+                "success_rate": detached_torch_tensor(extras["success"][reset].float()),
+                "survive_rate": detached_torch_tensor(extras["truncated"][reset].float()),
+                "l_episode": detached_torch_tensor(
+                    (extras["episode_length"][reset] - 1).float() * self.environment.config.dt
+                ),
+                "n_passed_gates": detached_torch_tensor(extras["n_passed_gates"][reset].float()),
+            }
+        return (
+            self.get_observations(),
+            detached_torch_tensor(reward),
+            detached_torch_tensor(done),
+            extras_out,
+        )
 
     def reset(self):
         self.policy_observation, self.critic_observation = self.environment.reset()

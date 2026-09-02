@@ -1,5 +1,4 @@
 import math
-from pathlib import Path
 
 import torch
 
@@ -10,40 +9,29 @@ from genesis_drones.tasks.racing_core import (
     RaceTrackSpec,
     detect_race_events,
     evaluation_states_checksum,
-    gate_collision_loss,
-    gate_progress_loss,
-    gate_vector_field_loss,
     generate_initial_states,
     load_evaluation_initial_states,
+    racing_loss_reward,
     racing_observations,
     save_evaluation_initial_states,
     track_to_tensors,
 )
-from genesis_drones.tasks.racing_tracks import FIXED_SEVEN_GATE_TRACK
-
-
-SAFETY_RADIUS = 0.06
+from genesis_drones.tasks.racing_tracks import RACING_TRACK
 
 
 def _device() -> torch.device:
     return torch.device("cpu")
 
 
-def _gate(
-    position: tuple[float, float, float],
-    yaw: float,
-    opening: float = 2.0,
-    outer: float = 3.0,
-    depth: float = 0.2,
-) -> GateSpec:
+def _gate(position: tuple[float, float, float], yaw: float) -> GateSpec:
     return GateSpec(
         position=position,
         quaternion=(math.cos(0.5 * yaw), 0.0, 0.0, math.sin(0.5 * yaw)),
-        opening_width=opening,
-        opening_height=opening,
-        outer_width=outer,
-        outer_height=outer,
-        depth=depth,
+        opening_width=3.0,
+        opening_height=3.0,
+        outer_width=3.0,
+        outer_height=3.0,
+        depth=0.0,
     )
 
 
@@ -51,218 +39,123 @@ def _track(*gates: GateSpec) -> RaceTrackSpec:
     return RaceTrackSpec(name="test", gates=gates, order=tuple(range(len(gates))))
 
 
-def _active(count: int, device: torch.device) -> torch.Tensor:
-    return torch.ones(count, device=device, dtype=torch.bool)
-
-
-def test_fixed_seven_coordinates_are_not_in_racing_core_source():
-    source = (Path(__file__).resolve().parents[1] / "genesis_drones" / "tasks" / "racing_core.py").read_text()
-    assert "10.0" not in source
-    assert "3.5668" not in source
-    assert "fixed_seven" not in source
-
-
-def test_fourth_and_fifth_gates_keep_overlapping_opposite_normals():
-    track = track_to_tensors(FIXED_SEVEN_GATE_TRACK, device=_device(), dtype=torch.float32)
-    fourth = track.positions[3]
-    fifth = track.positions[4]
-    torch.testing.assert_close(fourth[:2], fifth[:2])
-    assert fourth[2] > fifth[2]
-    fourth_normal = track.rotations[3, :, 0]
-    fifth_normal = track.rotations[4, :, 0]
-    assert torch.dot(fourth_normal, fifth_normal) < 0.0
-
-
-def test_actor_observation_is_40d_and_critic_adds_remaining_gates():
-    device = _device()
-    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.0), 0.0), _gate((4.0, 0.0, 1.0), 0.0)), device, torch.float32)
-    position = torch.tensor([[-2.0, 0.1, 1.0]], device=device)
-    quaternion = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=device)
-    policy, critic = racing_observations(
-        position,
-        quaternion,
-        torch.tensor([[1.0, 0.0, 0.0]], device=device),
-        torch.zeros((1, 3), device=device),
-        torch.tensor([[0.1, 0.0, 0.0, 0.0]], device=device),
-        track,
-        torch.zeros(1, device=device, dtype=torch.long),
+def test_racing_track_matches_diffaero_eight_gate_loop():
+    expected_positions = torch.tensor(
+        (
+            (1.5, -1.5, 1.5),
+            (0.0, 0.0, 1.5),
+            (-1.5, 1.5, 1.5),
+            (0.0, 3.0, 1.5),
+            (1.5, 1.5, 1.5),
+            (0.0, 0.0, 1.5),
+            (-1.5, -1.5, 1.5),
+            (0.0, -3.0, 1.5),
+        )
     )
+    expected_yaws = torch.tensor((math.pi / 2, math.pi, math.pi / 2, 0.0, -math.pi / 2, -math.pi, -math.pi / 2, 0.0))
+    track = track_to_tensors(RACING_TRACK, _device(), torch.float32)
+    torch.testing.assert_close(track.positions, expected_positions)
+    normals = track.rotations[:, :, 0]
+    torch.testing.assert_close(torch.atan2(normals[:, 1], normals[:, 0]), expected_yaws, atol=1e-6, rtol=0.0)
+
+
+def test_racing_observation_matches_diffaero_gate_frame_layout():
+    track = track_to_tensors(RACING_TRACK, _device(), torch.float32)
+    target_gate = torch.zeros(1, dtype=torch.long)
+    position = track.positions[:1] - torch.tensor([[0.0, 1.0, 0.0]])
+    quaternion = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    velocity = torch.zeros(1, 3)
+    policy, critic = racing_observations(position, quaternion, velocity, track, target_gate)
     assert policy.shape == (1, POLICY_OBSERVATION_SIZE)
     assert critic.shape == (1, CRITIC_OBSERVATION_SIZE)
-    torch.testing.assert_close(critic[:, :40], policy)
-    torch.testing.assert_close(critic[:, 40], torch.tensor([2.0]))
+    torch.testing.assert_close(policy[0, :3], torch.tensor([1.0, 0.0, 0.0]), atol=1e-6, rtol=0.0)
+    torch.testing.assert_close(critic[0, :7], torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]))
 
 
-def test_actor_observation_ignores_world_translation():
-    device = _device()
-    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.0), 0.0)), device, torch.float32)
-    position = torch.tensor([[-2.0, 0.0, 1.0]], device=device)
-    quaternion = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=device)
-    velocity = torch.tensor([[0.5, 0.0, 0.0]], device=device)
-    zeros = torch.zeros((1, 3), device=device)
-    last_action = torch.zeros((1, 4), device=device)
-    gate_index = torch.zeros(1, device=device, dtype=torch.long)
-    policy, _ = racing_observations(position, quaternion, velocity, zeros, last_action, track, gate_index)
-    shifted_track = track_to_tensors(_track(_gate((3.0, 4.0, 2.0), 0.0)), device, torch.float32)
-    shifted_position = position + torch.tensor([[3.0, 4.0, 1.0]], device=device)
-    shifted, _ = racing_observations(
-        shifted_position, quaternion, velocity, zeros, last_action, shifted_track, gate_index
-    )
-    torch.testing.assert_close(policy, shifted, atol=1e-5, rtol=0.0)
+def test_gate_events_require_forward_crossing_and_l1_aperture():
+    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.5), 0.0), _gate((2.0, 0.0, 1.5), 0.0)), _device(), torch.float32)
+    target_gate = torch.tensor([0, 0, 0, 1])
+    previous = torch.tensor(((-1.0, 0.0, 1.5), (-1.0, 1.6, 1.5), (-1.0, 0.0, 1.5), (1.0, 0.0, 1.5)))
+    current = torch.tensor(((1.0, 0.0, 1.5), (1.0, 1.6, 1.5), (-0.5, 0.0, 1.5), (3.0, 0.0, 1.5)))
+    events = detect_race_events(previous, current, track, target_gate, torch.ones(4, dtype=torch.bool))
+    assert events.passed.tolist() == [True, False, False, True]
+    assert events.analytic_collision.tolist() == [False, True, False, False]
+    assert events.next_gate_index.tolist() == [1, 0, 0, 0]
+    assert not events.completed.any()
 
 
-def test_high_speed_segment_detects_forward_pass_and_rejects_wrong_way():
-    device = _device()
-    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.0), 0.0)), device, torch.float32)
-    gate_index = torch.zeros(2, device=device, dtype=torch.long)
+def test_backward_crossing_is_not_a_pass_or_collision():
+    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.5), 0.0)), _device(), torch.float32)
     events = detect_race_events(
-        torch.tensor([[-10.0, 0.0, 1.0], [10.0, 0.0, 1.0]], device=device),
-        torch.tensor([[10.0, 0.0, 1.0], [-10.0, 0.0, 1.0]], device=device),
+        torch.tensor(((1.0, 0.0, 1.5),)),
+        torch.tensor(((-1.0, 0.0, 1.5),)),
         track,
-        gate_index,
-        SAFETY_RADIUS,
-        _active(2, device),
+        torch.zeros(1, dtype=torch.long),
+        torch.ones(1, dtype=torch.bool),
     )
-    assert events.passed.tolist() == [True, False]
-    assert events.wrong_way.tolist() == [False, True]
-    assert events.completed.tolist() == [True, False]
+    assert not bool(events.passed[0])
+    assert not bool(events.analytic_collision[0])
+    assert int(events.next_gate_index[0]) == 0
 
 
-def test_frame_crossing_outside_safe_opening_is_analytic_collision():
-    device = _device()
-    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.0), 0.0)), device, torch.float32)
+def test_target_gate_wraps_after_last_gate():
+    track = track_to_tensors(RACING_TRACK, _device(), torch.float32)
+    last = track.order.shape[0] - 1
+    gate_position = track.positions[last]
+    gate_normal = track.rotations[last, :, 0]
+    previous = (gate_position - gate_normal).unsqueeze(0)
+    current = (gate_position + gate_normal).unsqueeze(0)
     events = detect_race_events(
-        torch.tensor([[-1.0, 1.4, 1.0]], device=device),
-        torch.tensor([[1.0, 1.4, 1.0]], device=device),
-        track,
-        torch.zeros(1, device=device, dtype=torch.long),
-        SAFETY_RADIUS,
-        _active(1, device),
+        previous, current, track, torch.tensor([last]), torch.ones(1, dtype=torch.bool)
     )
-    assert events.passed.tolist() == [False]
-    assert events.analytic_collision.tolist() == [True]
+    assert bool(events.passed[0])
+    assert int(events.next_gate_index[0]) == 0
 
 
-def test_passing_last_gate_completes_and_remaining_gates_are_zero():
-    device = _device()
-    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.0), 0.0), _gate((4.0, 0.0, 1.0), 0.0)), device, torch.float32)
-    events = detect_race_events(
-        torch.tensor([[3.0, 0.0, 1.0]], device=device),
-        torch.tensor([[5.0, 0.0, 1.0]], device=device),
-        track,
-        torch.ones(1, device=device, dtype=torch.long),
-        SAFETY_RADIUS,
-        _active(1, device),
-    )
-    assert events.passed.tolist() == [True]
-    assert events.completed.tolist() == [True]
-    assert events.next_gate_index.tolist() == [2]
-    _, critic = racing_observations(
-        torch.tensor([[5.0, 0.0, 1.0]], device=device),
-        torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=device),
-        torch.zeros((1, 3), device=device),
-        torch.zeros((1, 3), device=device),
-        torch.zeros((1, 4), device=device),
-        track,
-        events.next_gate_index,
-    )
-    torch.testing.assert_close(critic[:, 40], torch.tensor([0.0]))
-
-
-def test_two_gate_track_advances_index_only_on_forward_pass():
-    device = _device()
-    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.0), 0.0), _gate((4.0, 0.0, 1.0), 0.0)), device, torch.float32)
-    events = detect_race_events(
-        torch.tensor([[-1.0, 0.0, 1.0]], device=device),
-        torch.tensor([[1.0, 0.0, 1.0]], device=device),
-        track,
-        torch.zeros(1, device=device, dtype=torch.long),
-        SAFETY_RADIUS,
-        _active(1, device),
-    )
-    assert events.next_gate_index.tolist() == [1]
-    assert events.completed.tolist() == [False]
-
-
-def test_initial_states_are_relative_to_first_gate_and_repeatable():
-    device = _device()
-    track = track_to_tensors(FIXED_SEVEN_GATE_TRACK, device, torch.float32)
-    first = generate_initial_states(track, count=8, seed=7)
-    second = generate_initial_states(track, count=8, seed=7)
-    different = generate_initial_states(track, count=8, seed=8)
+def test_reset_distribution_uses_random_gate_one_meter_behind():
+    track = track_to_tensors(RACING_TRACK, _device(), torch.float32)
+    first = generate_initial_states(track, count=64, seed=7)
+    second = generate_initial_states(track, count=64, seed=7)
+    assert torch.equal(first.target_gate, second.target_gate)
     torch.testing.assert_close(first.position, second.position)
-    torch.testing.assert_close(first.quaternion, second.quaternion)
-    torch.testing.assert_close(first.linear_velocity, second.linear_velocity)
-    assert not torch.equal(first.position, different.position)
-    gate_position = track.positions[track.order[0]]
-    gate_normal = track.rotations[0, :, 0]
-    offset = first.position - gate_position
-    along_normal = torch.sum(offset * gate_normal, dim=-1)
-    torch.testing.assert_close(along_normal, torch.full_like(along_normal, -2.0), atol=0.1, rtol=0.0)
+    gate_position = track.positions[first.target_gate]
+    gate_normal = track.rotations[first.target_gate, :, 0]
+    torch.testing.assert_close(first.position, gate_position - gate_normal)
+    torch.testing.assert_close(first.quaternion, torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(64, 1))
+    torch.testing.assert_close(first.linear_velocity, torch.zeros(64, 3))
+    assert first.target_gate.unique().numel() > 1
 
 
-def test_collision_loss_grows_near_frame_and_negative_gradient_points_away(tmp_path=None):
-    device = _device()
-    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.0), 0.0)), device, torch.float32)
-    far = torch.tensor([[0.0, 0.0, 1.0]], device=device, requires_grad=True)
-    near = torch.tensor([[0.0, 0.95, 1.0]], device=device, requires_grad=True)
-    zeros = torch.zeros((1, 3), device=device)
-    gate_index = torch.zeros(1, device=device, dtype=torch.long)
-    far_loss, far_clearance, _ = gate_collision_loss(far, zeros, track, gate_index, SAFETY_RADIUS, 0.01, 1.0, 4.0)
-    near_loss, near_clearance, _ = gate_collision_loss(near, zeros, track, gate_index, SAFETY_RADIUS, 0.01, 1.0, 4.0)
-    assert near_loss.item() > far_loss.item()
-    assert near_clearance.item() < far_clearance.item()
-    near_loss.backward()
-    assert torch.isfinite(near.grad).all()
-    toward_frame = torch.tensor([0.0, 1.0, 0.0], device=device)
-    assert torch.dot(near.grad[0], toward_frame) > 0.0
-
-
-def test_closing_speed_does_not_create_a_velocity_gradient_path():
-    device = _device()
-    track = track_to_tensors(_track(_gate((0.0, 0.0, 1.0), 0.0)), device, torch.float32)
-    position = torch.tensor([[0.0, 0.95, 1.0]], device=device, requires_grad=True)
-    velocity = torch.tensor([[0.0, 2.0, 0.0]], device=device, requires_grad=True)
-    loss, _, _ = gate_collision_loss(
+def test_racing_loss_and_reward_use_diffaero_quad_weights():
+    position = torch.tensor([[0.0, 0.0, 1.5]])
+    previous = torch.tensor([[-0.1, 0.0, 1.5]])
+    quaternion = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    velocity = torch.tensor([[1.0, 0.0, 0.0]])
+    angular_velocity = torch.tensor([[0.0, 0.0, 0.2]])
+    target = torch.tensor([[1.0, 0.0, 1.5]])
+    loss, reward, components = racing_loss_reward(
         position,
+        previous,
+        quaternion,
         velocity,
-        track,
-        torch.zeros(1, device=device, dtype=torch.long),
-        SAFETY_RADIUS,
-        0.01,
-        1.0,
-        4.0,
+        angular_velocity,
+        target,
+        torch.tensor([5.0]),
+        torch.tensor([False]),
     )
-    loss.backward()
-    assert position.grad is not None
-    assert velocity.grad is None or torch.equal(velocity.grad, torch.zeros_like(velocity))
-
-
-def test_progress_and_vector_field_losses_are_finite_for_any_gate_count():
-    device = _device()
-    for count in (1, 2, 7):
-        gates = tuple(_gate((float(index) * 3.0, 0.0, 1.0), 0.0) for index in range(count))
-        track = track_to_tensors(_track(*gates), device, torch.float32)
-        position = torch.tensor([[-1.0, 0.0, 1.0]], device=device, requires_grad=True)
-        velocity = torch.tensor([[1.0, 0.0, 0.0]], device=device)
-        gate_index = torch.zeros(1, device=device, dtype=torch.long)
-        progress = gate_progress_loss(position, velocity, track, gate_index)
-        field = gate_vector_field_loss(position, velocity, track, gate_index)
-        (progress + field).backward()
-        assert torch.isfinite(progress)
-        assert torch.isfinite(field)
-        assert torch.isfinite(position.grad).all()
+    torch.testing.assert_close(components["progress_loss"], torch.tensor([-0.1]), atol=1e-6, rtol=0.0)
+    torch.testing.assert_close(loss, components["vel_loss"] + 0.001 * components["jerk_loss"] + 3.0 * components["pos_loss"] + 0.1 * components["attitude_loss"])
+    torch.testing.assert_close(reward, -0.1 * components["jerk_loss"] - 10.0 * components["progress_loss"])
 
 
 def test_evaluation_initial_states_round_trip_with_checksum(tmp_path):
-    device = _device()
-    track = track_to_tensors(FIXED_SEVEN_GATE_TRACK, device, torch.float32)
+    track = track_to_tensors(RACING_TRACK, _device(), torch.float32)
     states = generate_initial_states(track, count=100, seed=20250830)
     path = tmp_path / "eval_states.pt"
     checksum = save_evaluation_initial_states(states, path)
     loaded, loaded_checksum = load_evaluation_initial_states(path)
-    assert checksum == loaded_checksum
-    assert checksum == evaluation_states_checksum(states)
+    assert checksum == loaded_checksum == evaluation_states_checksum(states)
     torch.testing.assert_close(loaded.position, states.position)
     torch.testing.assert_close(loaded.quaternion, states.quaternion)
     torch.testing.assert_close(loaded.linear_velocity, states.linear_velocity)
+    torch.testing.assert_close(loaded.target_gate, states.target_gate)

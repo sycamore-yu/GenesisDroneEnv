@@ -4,19 +4,24 @@ from typing import NamedTuple
 import torch
 
 
+# DiffAero cfg/dynamics/quad.yaml defaults actually used by RateController.
+_MASS_DEFAULT = 1.0
+_INERTIA_XY_DEFAULT = 0.01
+_INERTIA_Z_DEFAULT = 0.02
+_DRAG_DEFAULT = 0.6
+
+
 @dataclass(frozen=True)
 class CtbrControllerConfig:
-    dt: float = 0.01
     gravity: float = 9.81
-    thrust_to_weight_ratio: float = 3.3
-    base_rpm: float = 62293.9641914
-    thrust_coefficient: float = 3.16e-10
-    moment_coefficient: float = 7.94e-12
-    motor_arm: float = 0.1
-    max_body_rates: tuple[float, float, float] = (6.0, 6.0, 3.0)
-    rate_kp: tuple[float, float, float] = (0.07, 0.07, 0.07)
-    rate_ki: tuple[float, float, float] = (0.002, 0.002, 0.002)
-    rate_kd: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    max_normalized_thrust: float = 5.0
+    max_body_rates: tuple[float, float, float] = (3.14, 3.14, 3.14)
+    mass_range: tuple[float, float] = (0.8, 1.2)
+    inertia_xy_range: tuple[float, float] = (0.008, 0.012)
+    inertia_z_range: tuple[float, float] = (0.015, 0.025)
+    drag_xy_range: tuple[float, float] = (0.5, 0.7)
+    drag_z_range: tuple[float, float] = (0.5, 0.7)
+    randomize: bool = True
 
 
 class CtbrOutput(NamedTuple):
@@ -32,76 +37,72 @@ class CtbrController:
         self.device = device
         self.dtype = dtype
         self.max_body_rates = torch.tensor(config.max_body_rates, device=device, dtype=dtype)
-        self.rate_kp = torch.tensor(config.rate_kp, device=device, dtype=dtype)
-        self.rate_ki = torch.tensor(config.rate_ki, device=device, dtype=dtype)
-        self.rate_kd = torch.tensor(config.rate_kd, device=device, dtype=dtype)
-        moment_ratio = config.moment_coefficient / config.thrust_coefficient
-        self.allocation = torch.tensor(
-            (
-                (1.0, 1.0, 1.0, 1.0),
-                (-config.motor_arm, -config.motor_arm, config.motor_arm, config.motor_arm),
-                (-config.motor_arm, config.motor_arm, config.motor_arm, -config.motor_arm),
-                (-moment_ratio, moment_ratio, -moment_ratio, moment_ratio),
-            ),
-            device=device,
-            dtype=dtype,
-        )
-        self.integral = torch.zeros((num_envs, 3), device=device, dtype=dtype)
-        self.last_angular_velocity = torch.zeros_like(self.integral)
+        self.mass = torch.full((num_envs,), _MASS_DEFAULT, device=device, dtype=dtype)
+        self.inertia = torch.tensor(
+            (_INERTIA_XY_DEFAULT, _INERTIA_XY_DEFAULT, _INERTIA_Z_DEFAULT), device=device, dtype=dtype
+        ).expand(num_envs, -1).clone()
+        self.drag = torch.full((num_envs, 3), _DRAG_DEFAULT, device=device, dtype=dtype)
 
     @property
     def hover_action(self) -> float:
-        return 2.0 / self.config.thrust_to_weight_ratio - 1.0
+        return 2.0 / self.config.max_normalized_thrust - 1.0
+
+    def _fill_defaults(self, environment_indices: torch.Tensor) -> None:
+        self.mass[environment_indices] = _MASS_DEFAULT
+        self.inertia[environment_indices, 0] = _INERTIA_XY_DEFAULT
+        self.inertia[environment_indices, 1] = _INERTIA_XY_DEFAULT
+        self.inertia[environment_indices, 2] = _INERTIA_Z_DEFAULT
+        self.drag[environment_indices] = _DRAG_DEFAULT
+
+    def randomize(self, environment_indices: torch.Tensor | None = None, seed: int | None = None) -> None:
+        if environment_indices is None:
+            environment_indices = torch.arange(self.num_envs, device=self.device)
+        if not self.config.randomize:
+            self._fill_defaults(environment_indices)
+            return
+        generator = None if seed is None else torch.Generator(device=self.device).manual_seed(seed)
+        count = environment_indices.numel()
+
+        def sample(bounds: tuple[float, float]) -> torch.Tensor:
+            return torch.rand(count, device=self.device, dtype=self.dtype, generator=generator) * (
+                bounds[1] - bounds[0]
+            ) + bounds[0]
+
+        self.mass[environment_indices] = sample(self.config.mass_range)
+        inertia_xy = sample(self.config.inertia_xy_range)
+        self.inertia[environment_indices, 0] = inertia_xy
+        self.inertia[environment_indices, 1] = inertia_xy
+        self.inertia[environment_indices, 2] = sample(self.config.inertia_z_range)
+        drag_xy = sample(self.config.drag_xy_range)
+        self.drag[environment_indices, 0] = drag_xy
+        self.drag[environment_indices, 1] = drag_xy
+        self.drag[environment_indices, 2] = sample(self.config.drag_z_range)
 
     def step(
         self, normalized_action: torch.Tensor, angular_velocity_body: torch.Tensor, is_active: torch.Tensor
     ) -> CtbrOutput:
         normalized_action = normalized_action.clamp(-1.0, 1.0)
-        collective_acceleration = (
-            0.5
-            * (normalized_action[:, 0] + 1.0)
-            * self.config.thrust_to_weight_ratio
-            * self.config.gravity
-        )
+        normalized_thrust = 0.5 * (normalized_action[:, 0] + 1.0) * self.config.max_normalized_thrust
         body_rate_command = normalized_action[:, 1:] * self.max_body_rates
-        command = torch.cat((collective_acceleration[:, None], body_rate_command), dim=-1)
-
-        error = body_rate_command - angular_velocity_body
-        integral = torch.clamp(self.integral + error * self.rate_ki * self.config.dt, -0.5, 0.5)
-        derivative = (self.last_angular_velocity - angular_velocity_body) * self.rate_kd / self.config.dt
-        pid_output = error * self.rate_kp + integral + derivative
-        self.integral = torch.where(is_active[:, None], integral, torch.zeros_like(integral))
-        self.last_angular_velocity = torch.where(
-            is_active[:, None], angular_velocity_body, torch.zeros_like(angular_velocity_body)
-        )
-
-        collective_fraction = collective_acceleration / (
-            self.config.thrust_to_weight_ratio * self.config.gravity
-        )
-        motor_fraction = torch.stack(
-            (
-                collective_fraction - pid_output[:, 0] - pid_output[:, 1] - pid_output[:, 2],
-                collective_fraction - pid_output[:, 0] + pid_output[:, 1] + pid_output[:, 2],
-                collective_fraction + pid_output[:, 0] + pid_output[:, 1] - pid_output[:, 2],
-                collective_fraction + pid_output[:, 0] - pid_output[:, 1] + pid_output[:, 2],
-            ),
-            dim=-1,
-        ).clamp(0.0, 1.0)
-        motor_rpm = torch.sqrt(
-            (motor_fraction * self.config.thrust_to_weight_ratio).clamp_min(1e-12)
-        ) * self.config.base_rpm
-        motor_thrust = self.config.thrust_coefficient * motor_rpm * motor_rpm
-        wrench = motor_thrust @ self.allocation.T
-        return CtbrOutput(command, motor_thrust, wrench)
+        angular_acceleration = body_rate_command - angular_velocity_body
+        angular_momentum = self.inertia * angular_velocity_body
+        gyroscopic = torch.linalg.cross(angular_velocity_body, angular_momentum, dim=-1)
+        gyroscopic = gyroscopic / torch.maximum(
+            gyroscopic.norm(dim=-1, keepdim=True) / 100.0,
+            gyroscopic.new_ones(()),
+        ).detach()
+        torque = self.inertia * angular_acceleration + gyroscopic
+        thrust = normalized_thrust * self.config.gravity * self.mass
+        command = torch.cat((normalized_thrust[:, None], body_rate_command), dim=-1)
+        motor_thrust = thrust[:, None].expand(-1, 4) * 0.25
+        wrench = torch.cat((thrust[:, None], torque), dim=-1)
+        active = is_active[:, None].to(dtype=wrench.dtype)
+        return CtbrOutput(command * active, motor_thrust * active, wrench * active)
 
     def reset(self, environment_indices: torch.Tensor | None = None) -> None:
-        if environment_indices is None:
-            self.integral.zero_()
-            self.last_angular_velocity.zero_()
-            return
-        self.integral[environment_indices] = 0.0
-        self.last_angular_velocity[environment_indices] = 0.0
+        pass
 
     def detach(self) -> None:
-        self.integral = self.integral.detach()
-        self.last_angular_velocity = self.last_angular_velocity.detach()
+        self.mass = self.mass.detach()
+        self.inertia = self.inertia.detach()
+        self.drag = self.drag.detach()

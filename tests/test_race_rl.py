@@ -1,7 +1,7 @@
 import torch
 
 from genesis_drones.algorithms.diff_rl import ApgConfig, NetworkConfig, RunningNormalizer, ShacConfig, make_diff_agent
-from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig, RacingLossScales
+from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
 
 import genesis as gs
 
@@ -77,7 +77,6 @@ def test_shac_keeps_terminal_value_on_time_truncation():
         RaceEnvConfig(
             horizon=1,
             max_episode_steps=1,
-            loss_scales=RacingLossScales(0.0, 0.0, 0.0, 0.0, 0.0),
         ),
         num_envs=2,
         requires_grad=True,
@@ -86,7 +85,7 @@ def test_shac_keeps_terminal_value_on_time_truncation():
         "shac",
         environment.spec,
         NetworkConfig(),
-        ShacConfig(horizon=1, gamma=0.999, td_lambda=0.95),
+        ShacConfig(horizon=1, gamma=0.99, td_lambda=0.95),
         device,
     )
     observation = environment.reset_diff(seed=6)
@@ -101,12 +100,14 @@ def test_time_truncation_uses_critic_observation_from_before_reset():
     observation, critic_observation = environment.reset(seed=5)
     hover = torch.full((2, 4), environment.controller.hover_action, device=gs.device)
     hover[:, 1:] = 0.0
+    environment.step(hover)
     next_observation, _, done, extras = environment.step(hover)
     assert extras["truncated"].any()
-    assert extras["critic_observation"].shape[-1] == 41
+    assert extras["critic_observation"].shape[-1] == 34
     assert not torch.equal(extras["critic_observation"], extras["critic_observation_live"])
 
     diff_observation = environment.reset_diff(seed=5)
+    environment.step_diff(hover)
     transition = environment.step_diff(hover)
     assert diff_observation.policy.shape[-1] == environment.spec.policy_observation_dim
     assert transition.bootstrap_critic.shape[-1] == environment.spec.critic_observation_dim

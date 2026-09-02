@@ -12,10 +12,9 @@ from genesis_drones.tasks.racing_core import (
     EvaluationInitialStates,
     RaceTrackSpec,
     detect_race_events,
-    gate_corners_world,
     track_to_tensors,
 )
-from genesis_drones.tasks.racing_tracks import FIXED_SEVEN_GATE_TRACK
+from genesis_drones.tasks.racing_tracks import RACING_TRACK
 
 GATE4_INDEX = 3
 GATE5_INDEX = 4
@@ -37,7 +36,7 @@ class SplitSPlan:
     dt: float
 
 
-def split_s_waypoints(track: RaceTrackSpec = FIXED_SEVEN_GATE_TRACK, standoff: float = STANDOFF) -> np.ndarray:
+def split_s_waypoints(track: RaceTrackSpec = RACING_TRACK, standoff: float = STANDOFF) -> np.ndarray:
     tensors = track_to_tensors(track, torch.device("cpu"), torch.float32)
     g4 = tensors.positions[GATE4_INDEX].numpy()
     n4 = tensors.rotations[GATE4_INDEX, :, 0].numpy()
@@ -61,15 +60,15 @@ def _flatness(velocity: np.ndarray, acceleration: np.ndarray, dt: float, gravity
     y_norm = np.linalg.norm(y_body, axis=1, keepdims=True).clip(min=1e-6)
     y_body = y_body / y_norm
     x_body = np.cross(y_body, z_body)
-    rotation = np.stack((x_body, y_body, z_body), axis=-1)
-    rotation_dot = np.gradient(rotation, dt, axis=0)
-    omega_hat = np.matmul(np.transpose(rotation, (0, 2, 1)), rotation_dot)
-    body_rate = np.stack((omega_hat[:, 2, 1], omega_hat[:, 0, 2], omega_hat[:, 1, 0]), axis=1)
+    rotation = np.stack((x_body, y_body, z_body), axis=2)
+    body_rate = np.gradient(
+        Rotation.from_matrix(rotation).as_rotvec(), dt, axis=0, edge_order=2
+    )
     return collective[:, 0], body_rate, rotation
 
 
 def _normalized_action(collective: np.ndarray, body_rate: np.ndarray, config: CtbrControllerConfig) -> np.ndarray:
-    max_collective = config.thrust_to_weight_ratio * config.gravity
+    max_collective = config.max_normalized_thrust * config.gravity
     thrust_action = 2.0 * collective / max_collective - 1.0
     rate_action = body_rate / np.asarray(config.max_body_rates)
     return np.concatenate((thrust_action[:, None], rate_action), axis=1)
@@ -94,8 +93,8 @@ def _plan_once(waypoints: np.ndarray, dt: float, cruise_speed: float, config: Ct
 
 
 def plan_split_s_trajectory(
-    track: RaceTrackSpec = FIXED_SEVEN_GATE_TRACK,
-    dt: float = 0.01,
+    track: RaceTrackSpec = RACING_TRACK,
+    dt: float = 0.0333,
     cruise_speed: float = 1.6,
     standoff: float = STANDOFF,
     config: CtbrControllerConfig | None = None,
@@ -114,14 +113,15 @@ def plan_split_s_trajectory(
 
 def assert_ctbr_within_limits(plan: SplitSPlan, config: CtbrControllerConfig | None = None) -> None:
     config = config or CtbrControllerConfig()
-    max_collective = config.thrust_to_weight_ratio * config.gravity
+    max_collective = config.max_normalized_thrust * config.gravity
     assert np.all(plan.collective >= 0.05 * config.gravity)
     assert np.all(plan.collective <= 0.99 * max_collective)
     assert np.all(np.abs(plan.body_rate) <= np.asarray(config.max_body_rates) * 0.99)
     assert np.all(np.abs(plan.action) <= 0.95)
 
 
-def analytic_split_s_events(plan: SplitSPlan, track: RaceTrackSpec = FIXED_SEVEN_GATE_TRACK, safety_radius: float = 0.06):
+def analytic_split_s_events(plan: SplitSPlan, track: RaceTrackSpec = RACING_TRACK, safety_radius: float = 0.06):
+    del safety_radius
     tensors = track_to_tensors(track, torch.device("cpu"), torch.float32)
     position = torch.tensor(plan.position, dtype=torch.float32)
     gate_index = torch.tensor([GATE4_INDEX], dtype=torch.int64)
@@ -134,7 +134,6 @@ def analytic_split_s_events(plan: SplitSPlan, track: RaceTrackSpec = FIXED_SEVEN
             position[step + 1 : step + 2],
             tensors,
             gate_index,
-            safety_radius,
             active,
         )
         if bool(events.analytic_collision[0]) or bool(events.wrong_way[0]):
@@ -179,8 +178,21 @@ def tracking_action(
 
 
 def gate_corners(track: RaceTrackSpec, gate_index: int) -> np.ndarray:
+    gate = track.gates[gate_index]
     tensors = track_to_tensors(track, torch.device("cpu"), torch.float32)
-    return gate_corners_world(tensors, torch.tensor([gate_index]))[0].numpy()
+    rotation = tensors.rotations[gate_index].numpy()
+    center = np.asarray(gate.position, dtype=np.float64)
+    half_width = gate.opening_width * 0.5
+    half_height = gate.opening_height * 0.5
+    local = np.array(
+        (
+            (0.0, -half_width, -half_height),
+            (0.0, half_width, -half_height),
+            (0.0, half_width, half_height),
+            (0.0, -half_width, half_height),
+        )
+    )
+    return center + local @ rotation.T
 
 
 def replay_split_s(environment, plan: SplitSPlan) -> dict:
@@ -190,10 +202,10 @@ def replay_split_s(environment, plan: SplitSPlan) -> dict:
         position=torch.tensor(plan.position[:1], device=device, dtype=dtype),
         quaternion=torch.tensor(start_quaternion(plan)[None], device=device, dtype=dtype),
         linear_velocity=torch.tensor(plan.velocity[:1], device=device, dtype=dtype),
+        target_gate=torch.tensor([GATE4_INDEX], device=device, dtype=torch.int64),
     )
     environment.reset(initial_states=start)
     environment.respawn_on_fail = False
-    environment.gate_index.fill_(GATE4_INDEX)
     passed4 = False
     passed5 = False
     for step in range(len(plan.times)):
@@ -203,26 +215,25 @@ def replay_split_s(environment, plan: SplitSPlan) -> dict:
             step,
             state.position[0].detach().cpu().numpy(),
             state.linear_velocity[0].detach().cpu().numpy(),
-            environment.controller.config,
+            environment.config.controller,
         )
         _, _, _, extras = environment.step(torch.tensor(action[None], device=device, dtype=dtype))
-        if bool(extras["analytic_collision"][0]) or bool(extras["physics_collision"][0]) or bool(extras["wrong_way"][0]):
+        if bool(extras["analytic_collision"][0]) or bool(extras["wrong_way"][0]):
             return {
                 "passed4": passed4,
                 "passed5": passed5,
                 "collision": True,
-                "physics_collision": bool(extras["physics_collision"][0]),
-                "gate_index": int(extras["gate_index"][0]),
+                "gate_index": int(extras["target_gate"][0]),
             }
-        if bool(extras["passed"][0]) and int(extras["gate_index"][0]) == GATE5_INDEX:
-            passed4 = True
-        if bool(extras["passed"][0]) and int(extras["gate_index"][0]) >= 5:
-            passed5 = True
-            break
+        if bool(extras["passed"][0]):
+            if int(extras["target_gate"][0]) == GATE5_INDEX:
+                passed4 = True
+            elif int(extras["target_gate"][0]) == GATE5_INDEX + 1:
+                passed5 = True
+                break
     return {
         "passed4": passed4,
         "passed5": passed5,
         "collision": False,
-        "physics_collision": False,
-        "gate_index": int(environment.gate_index[0]),
+        "gate_index": int(environment.target_gates[0]),
     }

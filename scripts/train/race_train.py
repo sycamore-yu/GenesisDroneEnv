@@ -48,7 +48,6 @@ def make_env(data: dict, num_envs: int, requires_grad: bool) -> RaceEnv:
         dt=environment_data["dt"],
         horizon=environment_data["horizon"],
         max_episode_steps=environment_data["max_episode_steps"],
-        enable_gate_contact=environment_data["enable_gate_contact"],
         gamma=environment_data["gamma"],
         td_lambda=environment_data["td_lambda"],
     )
@@ -75,7 +74,7 @@ def train_ppo(args: argparse.Namespace, data: dict, log_dir: Path) -> None:
         runner.load(str(args.resume))
     iterations = train_config["max_iterations"] if args.updates is None else args.updates
     runner.learn(num_learning_iterations=iterations, init_at_random_ep_len=True)
-    (log_dir / "contract.json").write_text(json.dumps({"algorithm": "ppo", **RACING_CONTRACT, "gamma": 0.999, "lambda": 0.95}, indent=2))
+    (log_dir / "contract.json").write_text(json.dumps({"algorithm": "ppo", **RACING_CONTRACT}, indent=2))
 
 
 def train_diff(args: argparse.Namespace, data: dict, log_dir: Path) -> None:

@@ -22,7 +22,7 @@ from genesis_drones.evaluation.split_s import (
     replay_split_s,
     split_s_waypoints,
 )
-from genesis_drones.tasks.racing_tracks import FIXED_SEVEN_GATE_TRACK
+from genesis_drones.tasks.racing_tracks import RACING_TRACK
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -44,8 +44,8 @@ def plot_plan(plan) -> None:
     n4 = n4 / np.linalg.norm(n4)
     n5 = waypoints[5] - waypoints[3]
     n5 = n5 / np.linalg.norm(n5)
-    c4 = gate_corners(FIXED_SEVEN_GATE_TRACK, GATE4_INDEX)
-    c5 = gate_corners(FIXED_SEVEN_GATE_TRACK, GATE5_INDEX)
+    c4 = gate_corners(RACING_TRACK, GATE4_INDEX)
+    c5 = gate_corners(RACING_TRACK, GATE5_INDEX)
     figure = plt.figure(figsize=(12, 4))
     ax3d = figure.add_subplot(1, 3, 1, projection="3d")
     ax3d.plot(plan.position[:, 0], plan.position[:, 1], plan.position[:, 2], color="C0", label="planned trajectory")
@@ -88,7 +88,7 @@ def main() -> None:
     if not gs._initialized:
         gs.init(backend=gs.gpu if torch.cuda.is_available() else gs.cpu, logging_level="warning")
     environment = RaceEnv(
-        RaceEnvConfig(horizon=1, max_episode_steps=len(plan.times) + 50, enable_gate_contact=True),
+        RaceEnvConfig(horizon=1, max_episode_steps=len(plan.times) + 50),
         num_envs=1,
         requires_grad=False,
     )

@@ -14,6 +14,7 @@ from genesis_drones.algorithms.diff_rl import (
     diff_algorithm_names,
     make_diff_agent,
 )
+from genesis_drones.controllers.ctbr_controller import CtbrControllerConfig
 from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
 from genesis_drones.evaluation.race import (
     RACING_CONTRACT,
@@ -36,8 +37,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config" / "race" / "train.yaml")
     parser.add_argument("--states", type=Path, default=PROJECT_ROOT / "config" / "race" / "eval_states.pt")
     parser.add_argument("--write-states", action="store_true")
-    parser.add_argument("--enable-gate-contact", action="store_true", default=True)
-    parser.add_argument("--no-gate-contact", action="store_true")
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -51,9 +50,11 @@ def main() -> None:
         dt=data["environment"]["dt"],
         horizon=1,
         max_episode_steps=data["environment"]["max_episode_steps"],
-        enable_gate_contact=args.enable_gate_contact and not args.no_gate_contact,
+        min_target_velocity=5.0,
+        max_target_velocity=5.0,
         gamma=data["environment"]["gamma"],
         td_lambda=environment_lambda(data),
+        controller=CtbrControllerConfig(randomize=False),
     )
     assert_shared_racing_contract(config)
     environment = RaceEnv(config, num_envs=1, requires_grad=False)
@@ -69,7 +70,6 @@ def main() -> None:
         **summarize_race_results(results),
         "checksum": checksum,
         "algorithm": args.algo,
-        "gate_contact": config.enable_gate_contact,
         "contract": RACING_CONTRACT,
     }
     output = args.output or PROJECT_ROOT / "logs" / "race" / f"{args.algo}_eval.json"

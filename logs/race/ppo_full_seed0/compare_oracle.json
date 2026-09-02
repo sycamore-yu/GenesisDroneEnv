@@ -1,0 +1,45 @@
+{
+  "genesis_run": "logs/race/ppo_full_seed0",
+  "oracle": "/home/tong/tongworkspace/experiments/GenesisDroneEnv/diffaero_oracle/racing_quad_ppo_seed0",
+  "upstream": "291ea14",
+  "git_head": "66f73cf",
+  "git_dirty": true,
+  "train": {
+    "note": "Genesis Mean reward is episode return. DiffAero total_reward is per-step mean.",
+    "genesis_iter999": {
+      "episode_return": 290.8,
+      "episode_steps": 472.1,
+      "per_step_reward_approx": 0.616,
+      "success_rate": 0.1875,
+      "survive_rate": 0.4688,
+      "l_episode_s": 16.33,
+      "n_passed_gates": 19.66,
+      "action_std": 20.81
+    },
+    "diffaero_iter990": {
+      "per_step_reward": 0.254,
+      "success_rate": 0.0615,
+      "survive_rate": 0.3438,
+      "l_episode_s": 16.60,
+      "n_passed_gates": 10.33
+    }
+  },
+  "eval": {
+    "note": "Protocols differ. DiffAero: 4096 envs, 10000 steps, randomizer off, target vel 5. Genesis short: 256 envs, 2500 steps, same randomizer/vel, deterministic mean then env clamp.",
+    "genesis_deterministic_256x2500": {
+      "success_rate": 0.0305,
+      "survive_rate": 0.3769,
+      "l_episode_s": 10.90,
+      "n_passed_gates": 13.51,
+      "n_resets": 1674
+    },
+    "diffaero_4096x10000": {
+      "success_rate": 0.6029,
+      "survive_rate": 0.7689,
+      "l_episode_s": 30.97,
+      "n_passed_gates": 22.06
+    }
+  },
+  "likely_gap": "ppo_action_distribution",
+  "evidence": "Trained actor mean is entirely outside [-1,1] (absmax ~69). rsl_rl has no tanh; env clamps. DiffAero PPO is tanh-squashed. Action std grew 0.24 -> 20.8. Task metrics during training still rose (gates 0 -> 19)."
+}

@@ -5,7 +5,6 @@ import torch
 import genesis as gs
 
 from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
-from genesis_drones.evaluation.split_s import plan_split_s_trajectory, replay_split_s
 
 
 def _ensure_genesis():
@@ -40,20 +39,47 @@ def test_next_state_has_gradient_to_normalized_action():
     extras["actual_wrench"].sum().backward()
     assert action.grad is not None
     assert torch.isfinite(action.grad).all()
-    assert observation.shape[-1] == 40
+    assert observation.shape[-1] == 13
 
 
-def test_split_s_is_feasible_with_shared_ctbr_and_real_dynamics():
+def test_hover_and_thrust_and_roll_are_physically_reasonable():
     _ensure_genesis()
-    plan = plan_split_s_trajectory()
-    environment = RaceEnv(
-        RaceEnvConfig(horizon=1, max_episode_steps=len(plan.times) + 50, enable_gate_contact=True),
-        num_envs=1,
-        requires_grad=False,
-    )
-    result = replay_split_s(environment, plan)
-    assert result["passed4"]
-    assert result["passed5"]
-    assert not result["collision"]
+    environment = RaceEnv(RaceEnvConfig(horizon=1), num_envs=1, requires_grad=False)
+    environment.reset(seed=0)
+    hover = torch.tensor([[environment.controller.hover_action, 0.0, 0.0, 0.0]], device=gs.device)
+    start = environment._read_state().position.clone()
+    for _ in range(20):
+        environment.step(hover)
+    hovered = environment._read_state().position
+    assert torch.isfinite(hovered).all()
+    assert (hovered[0, 2] - start[0, 2]).abs() < 0.5
+
+    environment.reset(seed=0)
+    extra_thrust = hover.clone()
+    extra_thrust[0, 0] = 0.5
+    environment.step(extra_thrust)
+    after_thrust = environment._read_state()
+    assert after_thrust.linear_velocity[0, 2] > 0.0
+
+    environment.reset(seed=0)
+    roll = hover.clone()
+    roll[0, 1] = 1.0
+    environment.step(roll)
+    after_roll = environment._read_state()
+    assert after_roll.angular_velocity_world[0, 0].abs() > after_roll.angular_velocity_world[0, 1].abs()
+
+
+def test_time_limit_is_truncation_and_collision_is_termination():
+    _ensure_genesis()
+    environment = RaceEnv(RaceEnvConfig(horizon=1, max_episode_steps=1), num_envs=1, requires_grad=False)
+    environment.respawn_on_fail = False
+    environment.reset(seed=0)
+    hover = torch.tensor([[environment.controller.hover_action, 0.0, 0.0, 0.0]], device=gs.device)
+    # DiffAero checks progress >= max_steps before incrementing, so max_steps=1 truncates on step 2.
+    environment.step(hover)
+    _, _, done, extras = environment.step(hover)
+    assert bool(done[0])
+    assert bool(extras["truncated"][0])
+    assert not bool(extras["terminated"][0])
     source = Path(__file__).resolve().parents[1] / "genesis_drones" / "envs" / "race_env.py"
     assert "split_s" not in source.read_text()

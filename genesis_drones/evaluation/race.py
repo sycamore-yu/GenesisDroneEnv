@@ -6,20 +6,22 @@ import torch
 
 from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
 from genesis_drones.tasks.racing_core import (
+    CRITIC_OBSERVATION_SIZE,
+    POLICY_OBSERVATION_SIZE,
     EvaluationInitialStates,
     generate_initial_states,
 )
 
 
 RACING_CONTRACT = {
-    "track": "fixed_seven",
+    "track": "diffaero_racing",
     "action": "ctbr",
-    "policy_observation_size": 40,
-    "critic_observation_size": 41,
-    "dt": 0.01,
-    "max_episode_steps": 3000,
+    "policy_observation_size": POLICY_OBSERVATION_SIZE,
+    "critic_observation_size": CRITIC_OBSERVATION_SIZE,
+    "dt": 0.0333,
+    "max_episode_steps": int(40.0 / 0.0333),
     "controller": "ctbr",
-    "gamma": 0.999,
+    "gamma": 0.99,
     "td_lambda": 0.95,
 }
 
@@ -35,10 +37,9 @@ def assert_shared_racing_contract(config: RaceEnvConfig) -> None:
 class RaceEpisodeResult:
     completed: bool
     analytic_collision: bool
-    physics_collision: bool
     failed: bool
     completion_time: float
-    gate_times: list[float]
+    gates_passed: int
     mean_speed: float
     path_efficiency: float
 
@@ -59,33 +60,32 @@ def evaluate_policy(
             states.position[index : index + 1],
             states.quaternion[index : index + 1],
             states.linear_velocity[index : index + 1],
+            states.target_gate[index : index + 1],
         )
         policy_observation, _ = environment.reset(initial_states=one)
         analytic_collision = False
-        physics_collision = False
-        completed = False
-        for _ in range(environment.config.max_episode_steps):
+        extras = None
+        for _ in range(environment.config.max_episode_steps + 1):
             action = action_fn(policy_observation)
             policy_observation, _, done, extras = environment.step(action)
             analytic_collision = analytic_collision or bool(extras["analytic_collision"][0])
-            physics_collision = physics_collision or bool(extras["physics_collision"][0])
-            completed = completed or bool(extras["completed"][0])
             if bool(done[0]):
                 break
         steps = int(environment.episode_length_buf[0].item())
         duration = max(steps, 1) * environment.config.dt
         path_length = float(environment.path_length[0].item())
-        gate_times = environment.gate_pass_time[0].detach().cpu().tolist()
+        gates_passed = int(environment.n_passed_gates[0].item())
+        completed = bool(extras["success"][0])
+        failed = analytic_collision
         results.append(
             RaceEpisodeResult(
                 completed=completed,
                 analytic_collision=analytic_collision,
-                physics_collision=physics_collision,
-                failed=analytic_collision or physics_collision or not completed,
+                failed=failed,
                 completion_time=duration,
-                gate_times=gate_times,
+                gates_passed=gates_passed,
                 mean_speed=path_length / duration,
-                path_efficiency=0.0 if path_length == 0.0 else 1.0 / path_length,
+                path_efficiency=0.0 if path_length == 0.0 else gates_passed / path_length,
             )
         )
     return results
@@ -93,24 +93,18 @@ def evaluate_policy(
 
 def summarize_race_results(results: list[RaceEpisodeResult]) -> dict:
     count = max(len(results), 1)
-    success = sum(result.completed and not result.failed for result in results) / count
+    success = sum(result.completed for result in results) / count
     analytic = sum(result.analytic_collision for result in results) / count
-    physics = sum(result.physics_collision for result in results) / count
-    collision = sum(result.analytic_collision or result.physics_collision for result in results) / count
+    collision = analytic
     completed = [result for result in results if result.completed]
-    gate_count = len(results[0].gate_times) if results else 0
-    mean_gate_times = [
-        sum(result.gate_times[index] for result in completed) / max(len(completed), 1) for index in range(gate_count)
-    ]
     return {
         "success_rate": success,
         "collision_rate": collision,
         "analytic_collision_rate": analytic,
-        "physics_collision_rate": physics,
         "mean_completion_time": sum(result.completion_time for result in completed) / max(len(completed), 1)
         if completed
         else 0.0,
-        "mean_gate_times": mean_gate_times,
+        "mean_gates_passed": sum(result.gates_passed for result in results) / count,
         "mean_speed": sum(result.mean_speed for result in results) / count,
         "mean_path_efficiency": sum(result.path_efficiency for result in results) / count,
         "count": count,
