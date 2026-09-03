@@ -13,7 +13,8 @@ import yaml
 import genesis as gs
 
 from genesis_drones.envs.genesis_env import Genesis_env
-from genesis_drones.envs.track_diff_env import TrackDiffEnv, quaternion_to_roll_pitch_yaw
+from genesis_drones.envs.track_diff_env import TrackDiffEnv
+from genesis_drones.utils.geometry import quaternion_to_roll_pitch_yaw
 from genesis_drones.evaluation.track_diff import TrackScenarios
 from genesis_drones.utils.track_diff_config import load_track_diff_settings
 

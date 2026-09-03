@@ -1,0 +1,16 @@
+# @package _global_
+task: racing
+environment:
+  dt: 0.0333
+  horizon: 32
+  max_episode_steps: 1201
+  gamma: 0.99
+  td_lambda: 0.95
+  min_target_velocity: 5.0
+  max_target_velocity: 10.0
+sensor: relative_position
+log_root: logs/race
+num_envs:
+  ppo: 64
+  apg: 64
+  shac: 64

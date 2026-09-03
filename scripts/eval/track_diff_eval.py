@@ -9,6 +9,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
 
+from genesis_drones.adapters.policy import DiffRLPolicyAdapter
 from genesis_drones.algorithms.diff_rl import ApgAgent, RunningNormalizer, ShacAgent
 from genesis_drones.envs.genesis_env import Genesis_env
 from genesis_drones.envs.track_diff_env import TrackDiffEnv
@@ -399,13 +400,13 @@ def main() -> None:
 
     diff_environment = TrackDiffEnv(settings.environment, num_scenarios, requires_grad=False)
     apg_initial_metrics = evaluate_diff_policy(
-        diff_environment, apg_initial_agent, apg_initial_normalizer, scenarios
+        diff_environment, DiffRLPolicyAdapter(apg_initial_agent, apg_initial_normalizer), scenarios
     )
     shac_initial_metrics = evaluate_diff_policy(
-        diff_environment, shac_initial_agent, shac_initial_normalizer, scenarios
+        diff_environment, DiffRLPolicyAdapter(shac_initial_agent, shac_initial_normalizer), scenarios
     )
-    apg_metrics = evaluate_diff_policy(diff_environment, apg_agent, apg_normalizer, scenarios)
-    shac_metrics = evaluate_diff_policy(diff_environment, shac_agent, shac_normalizer, scenarios)
+    apg_metrics = evaluate_diff_policy(diff_environment, DiffRLPolicyAdapter(apg_agent, apg_normalizer), scenarios)
+    shac_metrics = evaluate_diff_policy(diff_environment, DiffRLPolicyAdapter(shac_agent, shac_normalizer), scenarios)
 
     with (PROJECT_ROOT / "config" / "track_rl" / "genesis_env.yaml").open() as file:
         environment_config = yaml.safe_load(file)

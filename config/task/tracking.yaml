@@ -1,0 +1,28 @@
+# @package _global_
+task: tracking
+environment:
+  dt: 0.01
+  horizon: 32
+  enable_collision: true
+  motor_arm: 0.1
+  moment_coefficient: 7.94e-12
+  body_collision_radius: 0.06
+  body_collision_half_height: 0.0125
+  ground_warning_distance: 0.2
+  horizontal_warning_distance: 0.5
+  vertical_warning_distance: 0.12
+  safety_temperature_ratio: 0.1
+sensor: state
+log_root: logs/track
+action_delta_weight: 0.0
+num_envs:
+  ppo: 64
+  apg: 64
+  shac: 64
+reward_scales:
+  target: 10.0
+  smooth: -0.0001
+  yaw: 0.01
+  angular: -0.0002
+  crash: -10.0
+  velocity: 0.0

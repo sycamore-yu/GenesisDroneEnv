@@ -3,7 +3,6 @@ from pathlib import Path
 
 import torch
 
-from genesis_drones.algorithms.diff_rl import ApgAgent, RunningNormalizer, ShacAgent
 from genesis_drones.envs.track_diff_env import TrackDiffEnv, TrackDiffEnvConfig
 
 
@@ -143,8 +142,7 @@ def classify_eval_step(
 
 def evaluate_diff_policy(
     environment: TrackDiffEnv,
-    agent: ApgAgent | ShacAgent,
-    normalizer: RunningNormalizer,
+    policy,
     scenarios: TrackScenarios,
 ) -> dict[str, torch.Tensor]:
     previous_vertical_rule = getattr(environment, "end_on_vertical_error", True)
@@ -184,7 +182,7 @@ def evaluate_diff_policy(
 
         with torch.no_grad():
             for step in range(max_steps):
-                action = agent.action(observation, normalizer, deterministic=True)
+                action = policy.act(observation, deterministic=True)
                 target_before = environment.target_position.detach().clone()
                 is_alive_before = environment.is_alive.clone()
                 observation, _, _, extras = environment.step(action)
@@ -262,8 +260,6 @@ def evaluate_diff_policy(
     finally:
         environment.end_on_vertical_error = previous_vertical_rule
         environment.respawn_on_fail = previous_respawn
-        # RigidSolver.get_state() caches every queried state, including in non-differentiable scenes.
-        # Reset the scene after evaluation so the 1500-step validation cache does not stay resident between runs.
         environment.scene.reset()
 
 

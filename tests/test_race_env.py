@@ -71,6 +71,8 @@ def test_hover_and_thrust_and_roll_are_physically_reasonable():
     environment = RaceEnv(_full_quad(horizon=1), num_envs=1, requires_grad=False)
     environment.reset(seed=0)
     hover = environment.hover_command(1)
+    environment.step(hover)
+    assert abs(float(environment._read_state().linear_velocity[0, 2])) < 0.05
     start = environment._read_state().position.clone()
     for _ in range(20):
         environment.step(hover)
@@ -83,14 +85,15 @@ def test_hover_and_thrust_and_roll_are_physically_reasonable():
     extra_thrust[0, 0] = 0.5
     environment.step(extra_thrust)
     after_thrust = environment._read_state()
-    assert after_thrust.linear_velocity[0, 2] > 0.0
+    # T = 3.75 * 9.81, m = 1 → vz ≈ 0.90; URDF mass 0.5 would give vz ≈ 2.12
+    assert 0.7 < float(after_thrust.linear_velocity[0, 2]) < 1.1
 
     environment.reset(seed=0)
     roll = hover.clone()
     roll[0, 1] = 1.0
     environment.step(roll)
     after_roll = environment._read_state()
-    assert after_roll.angular_velocity_world[0, 0].abs() > after_roll.angular_velocity_world[0, 1].abs()
+    assert after_roll.angular_velocity[0, 0].abs() > after_roll.angular_velocity[0, 1].abs()
 
 
 def test_native_quad_hover_stays_near_start_height():

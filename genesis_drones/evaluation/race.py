@@ -105,16 +105,23 @@ class RaceEpisodeResult:
     path_efficiency: float
 
 
-def make_evaluation_states(environment: RaceEnv, count: int = 100, seed: int = 20250830) -> EvaluationInitialStates:
-    return generate_initial_states(environment.track, count, seed=seed)
+def make_evaluation_states(environment, count: int = 100, seed: int = 20250830) -> EvaluationInitialStates:
+    track = getattr(environment, "track", None)
+    if track is None:
+        track = environment.task.track
+    return generate_initial_states(track, count, seed=seed)
 
 
 def evaluate_policy(
-    environment: RaceEnv,
+    environment,
     action_fn,
     states: EvaluationInitialStates,
 ) -> list[RaceEpisodeResult]:
     environment.respawn_on_fail = False
+    core = getattr(environment, "env", environment)
+    config = getattr(environment, "config", None)
+    max_steps = int(getattr(config, "max_episode_steps", core.task.config.max_episode_steps))
+    dt = float(getattr(config, "dt", core.dt))
     results = []
     for index in range(states.position.shape[0]):
         one = EvaluationInitialStates(
@@ -123,19 +130,30 @@ def evaluate_policy(
             states.linear_velocity[index : index + 1],
             states.target_gate[index : index + 1],
         )
-        policy_observation, _ = environment.reset(initial_states=one)
+        reset_out = environment.reset(initial_states=one)
+        policy_observation = reset_out[0] if isinstance(reset_out, tuple) else reset_out
         analytic_collision = False
         extras = None
-        for _ in range(environment.config.max_episode_steps + 1):
+        done_flag = False
+        for _ in range(max_steps + 1):
             action = action_fn(policy_observation)
-            policy_observation, _, done, extras = environment.step(action)
-            analytic_collision = analytic_collision or bool(extras["analytic_collision"][0])
-            if bool(done[0]):
+            step_out = environment.step(action)
+            if hasattr(step_out, "observation"):
+                policy_observation = step_out.observation.policy
+                done_flag = bool(step_out.done[0])
+                extras = step_out.extras
+                analytic_collision = analytic_collision or bool(extras.get("analytic_collision", extras.get("terminated"))[0])
+            else:
+                policy_observation, _, done, extras = step_out
+                done_flag = bool(done[0])
+                analytic_collision = analytic_collision or bool(extras["analytic_collision"][0])
+            if done_flag:
                 break
-        steps = int(environment.episode_length_buf[0].item())
-        duration = max(steps, 1) * environment.config.dt
-        path_length = float(environment.path_length[0].item())
-        gates_passed = int(environment.n_passed_gates[0].item())
+        task = getattr(environment, "task", None) or core.task
+        steps = int(task.episode_length_buf[0].item())
+        duration = max(steps, 1) * dt
+        path_length = float(task.path_length[0].item())
+        gates_passed = int(task.n_passed_gates[0].item())
         completed = bool(extras["success"][0])
         failed = analytic_collision
         results.append(

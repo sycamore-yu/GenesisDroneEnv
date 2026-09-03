@@ -1,13 +1,21 @@
 import torch
 
-from genesis_drones.envs.track_diff_env import TrackDiffEnvConfig, quaternion_to_roll_pitch_yaw
+from genesis_drones.controllers.native_config import NativeQuadConfig
+from genesis_drones.utils.geometry import quaternion_to_roll_pitch_yaw
 
 
 class NativeQuadMixer:
-    """TrackDiffEnv motor PID mixer. Racing reuses this plant, not DiffAero quad."""
+    """Native quadrotor motor PID mixer. Control numbers match TrackDiffEnvConfig."""
 
-    def __init__(self, num_envs: int, device: torch.device, dtype: torch.dtype, dt: float):
-        self.config = TrackDiffEnvConfig()
+    def __init__(
+        self,
+        num_envs: int,
+        device: torch.device,
+        dtype: torch.dtype,
+        dt: float,
+        config: NativeQuadConfig | None = None,
+    ):
+        self.config = config or NativeQuadConfig()
         self.dt = dt
         self.num_envs = num_envs
         self.device = device
@@ -31,12 +39,13 @@ class NativeQuadMixer:
         self.last_angular_velocity = torch.zeros((num_envs, 3), device=device, dtype=dtype)
 
     @staticmethod
-    def hover() -> float:
-        return 2.0 / TrackDiffEnvConfig().thrust_to_weight_ratio - 1.0
+    def hover(config: NativeQuadConfig | None = None) -> float:
+        cfg = config or NativeQuadConfig()
+        return 2.0 / cfg.thrust_to_weight_ratio - 1.0
 
     @property
     def hover_action(self) -> float:
-        return self.hover()
+        return self.hover(self.config)
 
     def reset(self, environment_indices: torch.Tensor) -> None:
         self.pid_integral[environment_indices] = 0.0

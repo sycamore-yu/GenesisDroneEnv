@@ -56,7 +56,7 @@ def test_diff_tracking_math_contracts():
     assert gauss[0] > gauss[1] > gauss[2]
     gauss.sum().backward()
     assert gauss_distance.grad is not None
-    from genesis_drones.envs.track_diff_env import quaternion_to_roll_pitch_yaw
+    from genesis_drones.utils.geometry import quaternion_to_roll_pitch_yaw
 
     identity_euler = quaternion_to_roll_pitch_yaw(torch.tensor([[1.0, 0.0, 0.0, 0.0]]))
     torch.testing.assert_close(identity_euler, torch.zeros(1, 3))
@@ -302,8 +302,8 @@ def test_evaluation_releases_scene_state_cache():
                 "mean_position_error": torch.tensor([0.1], device=device),
             }
 
-    class FakeAgent:
-        def action(self, observation, _normalizer, deterministic=True):
+    class FakePolicy:
+        def act(self, observation, deterministic=True):
             assert deterministic
             return torch.zeros((observation.shape[0], 4), device=observation.device)
 
@@ -313,7 +313,7 @@ def test_evaluation_releases_scene_state_cache():
         (),
         {"initial_position": None, "initial_quaternion": None, "waypoint_sequences": None},
     )()
-    metrics = evaluate_diff_policy(environment, FakeAgent(), object(), scenarios)
+    metrics = evaluate_diff_policy(environment, FakePolicy(), scenarios)
 
     assert environment.scene.reset_calls == 1
     torch.testing.assert_close(metrics["waypoint_count"], torch.tensor([2.0], device=device))

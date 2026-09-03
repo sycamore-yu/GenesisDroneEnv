@@ -1,0 +1,10 @@
+defaults:
+  - task: racing
+  - dynamics: native_quad
+  - algorithm: ppo
+  - sensor: state
+  - _self_
+
+seed: 0
+network:
+  hidden_sizes: [256, 128]

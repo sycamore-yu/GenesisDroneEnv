@@ -1,0 +1,8 @@
+# @package _global_
+algorithm: apg
+updates: 100
+save_interval: 50
+apg:
+  horizon: 32
+  learning_rate: 0.001
+  max_grad_norm: 1.0

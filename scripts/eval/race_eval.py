@@ -15,7 +15,7 @@ from genesis_drones.algorithms.diff_rl import (
     make_diff_agent,
 )
 from genesis_drones.controllers.ctbr_controller import CtbrControllerConfig
-from genesis_drones.controllers.quad_plant import QUAD_DYNAMICS
+from genesis_drones.dynamics import QUAD_DYNAMICS
 from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
 from genesis_drones.evaluation.race import (
     RACING_CONTRACT,

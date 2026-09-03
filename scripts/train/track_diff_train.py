@@ -1,25 +1,19 @@
+"""Legacy tracking DiffRL train → shared builder / train_loop."""
+
+from __future__ import annotations
+
 import argparse
-import json
-import shutil
-import time
 from datetime import datetime
 from pathlib import Path
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
 
 import genesis as gs
 
-from genesis_drones.algorithms.diff_rl import ApgAgent, RunningNormalizer, ShacAgent, diff_algorithm_names
-from genesis_drones.envs.differentiable import DiffObservation
-from genesis_drones.envs.track_diff_env import TrackDiffEnv
-from genesis_drones.evaluation.track_diff import TrackScenarios, evaluate_diff_policy, summarize_metrics
-from genesis_drones.utils.track_diff_config import (
-    build_track_diff_settings,
-    load_track_diff_settings,
-    make_track_diff_agent,
-    make_track_diff_normalizer,
-)
+from genesis_drones.algorithms.diff_rl import diff_algorithm_names
+from genesis_drones.experiment.builder import build_training_stack, run_spec_from_cfg
+from genesis_drones.experiment.train_loop import train_diff_stack
+from genesis_drones.utils.track_diff_config import load_track_diff_settings
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -31,319 +25,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config" / "track_diff" / "train.yaml")
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--updates", type=int)
-    parser.add_argument("--validation-scenarios", type=int)
-    parser.add_argument("--horizon", type=int, help="override environment and selected algorithm horizon together")
-    parser.add_argument("--progress-norm", choices=("l1", "l2"))
-    parser.add_argument("--closing-velocity-weight", type=float)
-    parser.add_argument("--arrival-surrogate", choices=("none", "gaussian", "sigmoid"))
-    parser.add_argument(
-        "--fully-differentiable",
-        action="store_true",
-        help="fixed-target continuous tracking reward; arrival/crash are metrics only",
-    )
+    parser.add_argument("--horizon", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--save-interval", type=int)
-    parser.add_argument("--resume", type=Path)
     parser.add_argument("--log-dir", type=Path)
-    parser.add_argument(
-        "--early-stop-patience",
-        type=int,
-        default=0,
-        help="stop after this many validation evals without beating best.pt. 0=off",
-    )
+    parser.add_argument("--fully-differentiable", action="store_true")
     return parser.parse_args()
-
-
-def save_checkpoint(
-    path: Path,
-    algorithm: str,
-    agent: ApgAgent | ShacAgent,
-    normalizer: RunningNormalizer,
-    environment: TrackDiffEnv,
-    config: dict,
-    update: int,
-    environment_steps: int,
-    best_key: tuple[float, float, float] | None,
-    best_update: int,
-    elapsed_seconds: float,
-) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "algorithm": algorithm,
-            "agent": agent.state_dict(),
-            "normalizer": normalizer.state_dict(),
-            "environment": environment.state_dict(),
-            "config": config,
-            "update": update,
-            "environment_steps": environment_steps,
-            "best_key": best_key,
-            "best_update": best_update,
-            "elapsed_seconds": elapsed_seconds,
-            "torch_rng_state": torch.get_rng_state(),
-            "cuda_rng_state": torch.cuda.get_rng_state_all(),
-        },
-        path,
-    )
 
 
 def main() -> None:
     args = parse_args()
     settings = load_track_diff_settings(args.config)
     data = dict(settings.raw)
-    changed = False
     if args.horizon is not None:
         data["environment"] = {**data["environment"], "horizon": args.horizon}
         data[args.algo] = {**data[args.algo], "horizon": args.horizon}
-        changed = True
-    if args.progress_norm is not None:
-        data["environment"] = {**data["environment"], "progress_norm": args.progress_norm}
-        changed = True
-    if args.closing_velocity_weight is not None:
-        data["environment"] = {**data["environment"], "closing_velocity_weight": args.closing_velocity_weight}
-        changed = True
-    if args.arrival_surrogate is not None:
-        data["environment"] = {**data["environment"], "arrival_surrogate": args.arrival_surrogate}
-        changed = True
     if args.fully_differentiable:
         data["environment"] = {**data["environment"], "fully_differentiable": True}
-        changed = True
     if args.seed is not None:
         data["seed"] = args.seed
-        changed = True
+    if args.updates is not None:
+        data["updates"] = args.updates
     if args.save_interval is not None:
         data["save_interval"] = args.save_interval
-        changed = True
-    if changed:
-        settings = build_track_diff_settings(data, PROJECT_ROOT)
-    gs.init(backend=gs.gpu, seed=settings.seed, logging_level="warning")
-    checkpoint = None
-    if args.resume is not None:
-        checkpoint = torch.load(args.resume, map_location="cuda:0", weights_only=False)
-        if checkpoint["algorithm"] != args.algo:
-            raise ValueError("resume checkpoint algorithm does not match --algo")
-        settings = build_track_diff_settings(checkpoint["config"], PROJECT_ROOT)
+    data["task"] = "tracking"
+    data["dynamics"] = "native_quad"
+    data["algorithm"] = args.algo
+    data["sensor"] = "state"
 
-    updates = settings.updates if args.updates is None else args.updates
-    num_envs_default = settings.algorithm_num_envs[args.algo]
-    num_envs = num_envs_default if args.num_envs is None else args.num_envs
-    validation_scenario_count = (
-        settings.validation_scenarios if args.validation_scenarios is None else args.validation_scenarios
-    )
-    horizon = settings.environment.horizon
+    run_spec = run_spec_from_cfg(data)
+    gs.init(backend=gs.gpu if torch.cuda.is_available() else gs.cpu, seed=run_spec.seed or 0, logging_level="warning")
+    num_envs = args.num_envs or int(data["num_envs"][args.algo])
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    objective_tag = ""
-    if settings.environment.progress_norm != "l1":
-        objective_tag += f"_{settings.environment.progress_norm}"
-    if settings.environment.closing_velocity_weight != 0.0:
-        objective_tag += f"_close{settings.environment.closing_velocity_weight:g}"
-    if settings.environment.arrival_surrogate != "none":
-        objective_tag += f"_{settings.environment.arrival_surrogate}"
-    if settings.environment.fully_differentiable:
-        objective_tag += "_fulldiff"
-    default_name = f"{args.algo}_H{horizon}{objective_tag}_s{settings.seed}_{timestamp}"
-    log_dir = args.log_dir or settings.log_root / default_name
+    log_dir = args.log_dir or PROJECT_ROOT / data["log_root"] / f"{args.algo}_{timestamp}"
     log_dir.mkdir(parents=True, exist_ok=True)
-
-    torch.manual_seed(settings.seed)
-    torch.cuda.manual_seed_all(settings.seed)
-
-    agent = make_track_diff_agent(args.algo, settings, gs.device)
-    normalizer = make_track_diff_normalizer(gs.device)
-    if checkpoint is not None:
-        agent.load_state_dict(checkpoint["agent"])
-        normalizer.load_state_dict(checkpoint["normalizer"])
-
-    # Optimizers must exist before the differentiable scene initializes its gradient runtime.
-    environment = TrackDiffEnv(settings.environment, num_envs, requires_grad=True)
-    if checkpoint is None:
-        observation = environment.reset_diff()
-        start_update = 0
-        environment_steps = 0
-        best_key = None
-        best_update = 0
-        elapsed_before_resume = 0.0
-    else:
-        policy_observation = environment.load_state_dict(checkpoint["environment"])
-        observation = DiffObservation(policy=policy_observation, critic=policy_observation)
-        start_update = checkpoint["update"]
-        environment_steps = checkpoint["environment_steps"]
-        best_key = checkpoint["best_key"]
-        best_update = checkpoint["best_update"]
-        elapsed_before_resume = checkpoint["elapsed_seconds"]
-        torch.set_rng_state(checkpoint["torch_rng_state"].cpu())
-        torch.cuda.set_rng_state_all([state.cpu() for state in checkpoint["cuda_rng_state"]])
-
-    validation_scenarios = TrackScenarios.generate(
-        validation_scenario_count,
-        settings.environment.max_episode_steps,
-        settings.environment,
-        settings.validation_seed,
-    )
-    validation_scenarios.save(log_dir / "validation_scenarios.pt")
-    validation_environment = TrackDiffEnv(
-        settings.environment,
-        validation_scenario_count,
-        requires_grad=False,
-    )
-    writer = SummaryWriter(log_dir)
-    validation_history = []
-    start_time = time.perf_counter()
-    torch.cuda.reset_peak_memory_stats()
-    evals_without_improvement = 0
-    stopped_early = False
-    stop_reason = None
-
-    if start_update == 0:
-        metrics = evaluate_diff_policy(validation_environment, agent, normalizer, validation_scenarios)
-        summary = summarize_metrics(metrics, settings.environment.max_episode_steps * settings.environment.dt)
-        if settings.environment.fully_differentiable:
-            best_key = (
-                -summary.mean_position_error.mean,
-                -summary.crash_rate.mean,
-                -summary.capped_first_arrival_time.mean,
-            )
-        else:
-            best_key = (
-                summary.waypoint_count.mean,
-                -summary.crash_rate.mean,
-                -summary.capped_first_arrival_time.mean,
-            )
-        validation_history.append({"update": 0, "summary": summary.to_dict()})
-        torch.save(metrics, log_dir / "validation_metrics_0000.pt")
-        save_checkpoint(
-            log_dir / "checkpoint_0000.pt",
-            args.algo,
-            agent,
-            normalizer,
-            environment,
-            settings.raw,
-            0,
-            0,
-            best_key,
-            0,
-            0.0,
-        )
-        shutil.copyfile(log_dir / "checkpoint_0000.pt", log_dir / "best.pt")
-
-    for update in range(start_update + 1, updates + 1):
-        observation, stats = agent.update(environment, observation, normalizer)
-        environment_steps += num_envs * stats.steps
-        if environment.episode_step >= settings.environment.max_episode_steps or not environment.is_alive.any():
-            observation = environment.reset_diff()
-
-        writer.add_scalar("train/actor_loss", stats.actor_loss, update)
-        writer.add_scalar("train/actor_grad_norm", stats.actor_grad_norm, update)
-        writer.add_scalar("train/mean_reward", stats.mean_reward, update)
-        writer.add_scalar("train/critic_loss", stats.critic_loss, update)
-        writer.add_scalar("train/critic_grad_norm", stats.critic_grad_norm, update)
-        writer.add_scalar("train/entropy", stats.entropy, update)
-        writer.add_scalar("train/valid_transitions", stats.valid_transitions, update)
-        writer.add_scalar("train/environment_steps", environment_steps, update)
-        if update % 10 == 0:
-            print(
-                f"update={update} actor_loss={stats.actor_loss:.6f} reward={stats.mean_reward:.6f} "
-                f"critic_loss={stats.critic_loss:.6f} actor_grad={stats.actor_grad_norm:.6f}",
-                flush=True,
-            )
-
-        if update % settings.save_interval == 0 or update == updates:
-            metrics = evaluate_diff_policy(validation_environment, agent, normalizer, validation_scenarios)
-            summary = summarize_metrics(metrics, settings.environment.max_episode_steps * settings.environment.dt)
-            torch.save(metrics, log_dir / f"validation_metrics_{update:04d}.pt")
-            validation_history.append({"update": update, "summary": summary.to_dict()})
-            writer.add_scalar("validation/waypoint_count", summary.waypoint_count.mean, update)
-            writer.add_scalar("validation/first_arrival_rate", summary.first_arrival_rate.mean, update)
-            writer.add_scalar("validation/crash_rate", summary.crash_rate.mean, update)
-            writer.add_scalar("validation/mean_position_error", summary.mean_position_error.mean, update)
-            writer.add_scalar("validation/mean_speed", summary.mean_speed.mean, update)
-            writer.add_scalar("validation/mean_closing_velocity", summary.mean_closing_velocity.mean, update)
-            writer.add_scalar("validation/path_efficiency", summary.path_efficiency.mean, update)
-            writer.add_scalar(
-                "validation/capped_first_arrival_time", summary.capped_first_arrival_time.mean, update
-            )
-            writer.add_scalar("validation/action_total_variation", summary.action_total_variation.mean, update)
-            if settings.environment.fully_differentiable:
-                candidate_key = (
-                    -summary.mean_position_error.mean,
-                    -summary.crash_rate.mean,
-                    -summary.capped_first_arrival_time.mean,
-                )
-            else:
-                candidate_key = (
-                    summary.waypoint_count.mean,
-                    -summary.crash_rate.mean,
-                    -summary.capped_first_arrival_time.mean,
-                )
-            if best_key is None or candidate_key > best_key:
-                best_key = candidate_key
-                best_update = update
-                evals_without_improvement = 0
-            else:
-                evals_without_improvement += 1
-            elapsed_seconds = elapsed_before_resume + time.perf_counter() - start_time
-            checkpoint_path = log_dir / f"checkpoint_{update:04d}.pt"
-            save_checkpoint(
-                checkpoint_path,
-                args.algo,
-                agent,
-                normalizer,
-                environment,
-                settings.raw,
-                update,
-                environment_steps,
-                best_key,
-                best_update,
-                elapsed_seconds,
-            )
-            if best_update == update:
-                shutil.copyfile(checkpoint_path, log_dir / "best.pt")
-            failed = not (stats.actor_loss == stats.actor_loss) or stats.actor_grad_norm != stats.actor_grad_norm
-            if failed:
-                stopped_early = True
-                stop_reason = "non_finite_loss_or_grad"
-                print(f"early stop at update={update}: {stop_reason}", flush=True)
-                break
-            if args.early_stop_patience > 0 and evals_without_improvement >= args.early_stop_patience:
-                stopped_early = True
-                stop_reason = f"no_improvement_for_{evals_without_improvement}_evals"
-                print(
-                    f"early stop at update={update}: {stop_reason} best_update={best_update}",
-                    flush=True,
-                )
-                break
-
-    elapsed_seconds = elapsed_before_resume + time.perf_counter() - start_time
-    free_memory, total_memory = torch.cuda.mem_get_info()
-    peak_reserved = torch.cuda.max_memory_reserved()
-    non_torch_memory = max(0, total_memory - free_memory - torch.cuda.memory_reserved())
-    estimated_peak_memory = non_torch_memory + peak_reserved
-    result = {
-        "algorithm": args.algo,
-        "seed": settings.seed,
-        "horizon": horizon,
-        "progress_norm": settings.environment.progress_norm,
-        "closing_velocity_weight": settings.environment.closing_velocity_weight,
-        "arrival_surrogate": settings.environment.arrival_surrogate,
-        "fully_differentiable": settings.environment.fully_differentiable,
-        "dt": settings.environment.dt,
-        "gradient_physical_time": horizon * settings.environment.dt,
-        "updates": updates,
-        "num_envs": num_envs,
-        "environment_steps": environment_steps,
-        "best_update": best_update,
-        "stopped_early": stopped_early,
-        "stop_reason": stop_reason,
-        "elapsed_seconds": elapsed_seconds,
-        "peak_memory_bytes": estimated_peak_memory,
-        "peak_torch_allocated_bytes": torch.cuda.max_memory_allocated(),
-        "peak_torch_reserved_bytes": peak_reserved,
-        "validation": validation_history,
-    }
-    with (log_dir / "training_summary.json").open("w") as file:
-        json.dump(result, file, indent=2)
-    writer.close()
-    print(json.dumps({key: value for key, value in result.items() if key != "validation"}, indent=2))
+    stack = build_training_stack(run_spec, data, num_envs, log_dir=log_dir)
+    train_diff_stack(stack, run_spec, data, int(data.get("updates", 400)), int(data.get("save_interval", 100)), log_dir)
 
 
 if __name__ == "__main__":

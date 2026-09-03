@@ -1,0 +1,16 @@
+defaults:
+  - task: racing
+  - dynamics: native_quad
+  - algorithm: ppo
+  - sensor: state
+  - _self_
+
+seed: 0
+checkpoint: null
+eval:
+  num_envs: 1
+  steps: null
+  states: config/race/eval_states.pt
+  output: null
+network:
+  hidden_sizes: [256, 128]
