@@ -1,0 +1,14 @@
+{
+  "algorithm": "apg",
+  "dynamics": "native_quad",
+  "track": "diffaero_racing",
+  "action": "normalized_4d",
+  "policy_observation_size": 13,
+  "critic_observation_size": 13,
+  "state_observation_size": 34,
+  "dt": 0.0333,
+  "max_episode_steps": 1201,
+  "gamma": 0.99,
+  "td_lambda": 0.95,
+  "horizon": 32
+}

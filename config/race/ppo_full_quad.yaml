@@ -20,11 +20,11 @@ algorithm:
   use_clipped_value_loss: true
   value_loss_coef: 2.0
 policy:
-  class_name: ActorCritic
+  class_name: SquashedActorCritic
   activation: elu
   actor_hidden_dims: [256, 128]
   critic_hidden_dims: [256, 128]
   init_noise_std: 0.2231301601
   noise_std_type: log
 runner_class_name: OnPolicyRunner
-experiment_name: racing-native-quad-ppo
+experiment_name: diffaero-racing-full-quad-ppo

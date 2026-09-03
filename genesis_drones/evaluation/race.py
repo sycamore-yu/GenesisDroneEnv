@@ -6,21 +6,22 @@ import torch
 
 from genesis_drones.envs.race_env import RaceEnv, RaceEnvConfig
 from genesis_drones.tasks.racing_core import (
-    CRITIC_OBSERVATION_SIZE,
     POLICY_OBSERVATION_SIZE,
+    STATE_OBSERVATION_SIZE,
     EvaluationInitialStates,
     generate_initial_states,
 )
 
 
+EXPERIMENT_AXES = ("task", "dynamics", "algorithm", "network", "sensor", "seed")
 RACING_CONTRACT = {
     "track": "diffaero_racing",
-    "action": "ctbr",
+    "action": "normalized_4d",
     "policy_observation_size": POLICY_OBSERVATION_SIZE,
-    "critic_observation_size": CRITIC_OBSERVATION_SIZE,
+    "critic_observation_size": POLICY_OBSERVATION_SIZE,
+    "state_observation_size": STATE_OBSERVATION_SIZE,
     "dt": 0.0333,
     "max_episode_steps": int(40.0 / 0.0333),
-    "controller": "ctbr",
     "gamma": 0.99,
     "td_lambda": 0.95,
 }
@@ -31,6 +32,66 @@ def assert_shared_racing_contract(config: RaceEnvConfig) -> None:
     assert config.max_episode_steps == RACING_CONTRACT["max_episode_steps"]
     assert config.gamma == RACING_CONTRACT["gamma"]
     assert config.td_lambda == RACING_CONTRACT["td_lambda"]
+
+
+def racing_experiment(algorithm: str, dynamics: str, seed: int) -> dict:
+    return {
+        "task": "racing",
+        "dynamics": dynamics,
+        "algorithm": algorithm,
+        "network": "mlp",
+        "sensor": "relative_position",
+        "seed": seed,
+        **RACING_CONTRACT,
+    }
+
+
+def write_experiment(path: Path, experiment: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(experiment, indent=2))
+
+
+def recorded_experiment(checkpoint_path: Path | None, payload: dict | None = None) -> dict:
+    recorded = {}
+    if checkpoint_path is not None:
+        for name in ("experiment.json", "contract.json"):
+            candidate = checkpoint_path.parent / name
+            if candidate.exists():
+                recorded.update(json.loads(candidate.read_text()))
+                break
+    if payload:
+        for key in EXPERIMENT_AXES:
+            if key in payload:
+                recorded[key] = payload[key]
+    return recorded
+
+
+def resolve_experiment(
+    algorithm: str,
+    dynamics: str | None,
+    recorded: dict,
+    fallback_dynamics: str,
+) -> dict:
+    recorded_algorithm = recorded.get("algorithm")
+    recorded_dynamics = recorded.get("dynamics")
+    if recorded_algorithm is not None and recorded_algorithm != algorithm:
+        raise ValueError(f"checkpoint algorithm {recorded_algorithm!r} does not match --algo {algorithm!r}")
+    if dynamics is not None and recorded_dynamics is not None and dynamics != recorded_dynamics:
+        raise ValueError(f"checkpoint dynamics {recorded_dynamics!r} does not match --dynamics {dynamics!r}")
+    return {
+        "task": recorded.get("task", "racing"),
+        "dynamics": dynamics or recorded_dynamics or fallback_dynamics,
+        "algorithm": algorithm,
+        "network": recorded.get("network", "mlp"),
+        "sensor": recorded.get("sensor", "relative_position"),
+        "seed": recorded.get("seed"),
+    }
+
+
+def apply_network_hidden_sizes(train_config: dict, hidden_sizes) -> None:
+    sizes = list(hidden_sizes)
+    train_config["policy"]["actor_hidden_dims"] = sizes
+    train_config["policy"]["critic_hidden_dims"] = sizes
 
 
 @dataclass
@@ -108,6 +169,49 @@ def summarize_race_results(results: list[RaceEpisodeResult]) -> dict:
         "mean_speed": sum(result.mean_speed for result in results) / count,
         "mean_path_efficiency": sum(result.path_efficiency for result in results) / count,
         "count": count,
+    }
+
+
+def evaluate_rolling(environment: RaceEnv, action_fn, n_steps: int) -> dict:
+    environment.respawn_on_fail = True
+    policy_observation, _ = environment.reset(seed=0)
+    n_resets = 0
+    sums = {key: 0.0 for key in ("passed", "success", "survive", "collision", "duration", "returns")}
+    step_reward_sum = 0.0
+    episode_return = torch.zeros(environment.num_envs, device="cpu")
+    dt = environment.config.dt
+    with torch.inference_mode():
+        for _ in range(n_steps):
+            action = action_fn(policy_observation)
+            policy_observation, (_, _, reward), done, extras = environment.step(action)
+            reward = reward.detach().float().cpu()
+            step_reward_sum += float(reward.mean().item())
+            episode_return = episode_return + reward
+            if not done.any():
+                continue
+            reset = done.detach().cpu().bool()
+            n = int(reset.sum().item())
+            n_resets += n
+            sums["passed"] += float(extras["n_passed_gates"].detach().cpu()[reset].float().sum().item())
+            sums["success"] += float(extras["success"].detach().cpu()[reset].float().sum().item())
+            sums["survive"] += float(extras["truncated"].detach().cpu()[reset].float().sum().item())
+            sums["collision"] += float(extras["terminated"].detach().cpu()[reset].float().sum().item())
+            sums["duration"] += float(((extras["episode_length"].detach().cpu()[reset] - 1).float() * dt).sum().item())
+            sums["returns"] += float(episode_return[reset].sum().item())
+            episode_return[reset] = 0.0
+
+    scale = max(n_resets, 1)
+    return {
+        "success_rate": sums["success"] / scale,
+        "survive_rate": sums["survive"] / scale,
+        "collision_rate": sums["collision"] / scale,
+        "mean_passed_gates": sums["passed"] / scale,
+        "mean_episode_seconds": sums["duration"] / scale,
+        "mean_episode_return": sums["returns"] / scale,
+        "mean_step_reward": step_reward_sum / max(n_steps, 1),
+        "n_steps": n_steps,
+        "n_envs": environment.num_envs,
+        "n_resets": n_resets,
     }
 
 

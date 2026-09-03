@@ -1,0 +1,27 @@
+{
+  "success_rate": 0.003805450855320383,
+  "survive_rate": 0.5436630182661641,
+  "collision_rate": 0.478327051319223,
+  "mean_passed_gates": 1.55699115685706,
+  "mean_episode_seconds": 3.02729680259553,
+  "mean_episode_return": 15.78838974449575,
+  "mean_step_reward": 0.15526456895454321,
+  "n_steps": 10000,
+  "n_envs": 1024,
+  "n_resets": 110368,
+  "checksum": null,
+  "algorithm": "ppo",
+  "dynamics": "full_quad",
+  "contract": {
+    "track": "diffaero_racing",
+    "action": "normalized_4d",
+    "policy_observation_size": 13,
+    "critic_observation_size": 13,
+    "state_observation_size": 34,
+    "dt": 0.0333,
+    "max_episode_steps": 1201,
+    "gamma": 0.99,
+    "td_lambda": 0.95
+  },
+  "protocol": "rolling"
+}

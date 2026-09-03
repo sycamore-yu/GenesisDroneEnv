@@ -3,8 +3,8 @@ import math
 import torch
 
 from genesis_drones.tasks.racing_core import (
-    CRITIC_OBSERVATION_SIZE,
     POLICY_OBSERVATION_SIZE,
+    STATE_OBSERVATION_SIZE,
     GateSpec,
     RaceTrackSpec,
     detect_race_events,
@@ -65,11 +65,11 @@ def test_racing_observation_matches_diffaero_gate_frame_layout():
     position = track.positions[:1] - torch.tensor([[0.0, 1.0, 0.0]])
     quaternion = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
     velocity = torch.zeros(1, 3)
-    policy, critic = racing_observations(position, quaternion, velocity, track, target_gate)
+    policy, state = racing_observations(position, quaternion, velocity, track, target_gate)
     assert policy.shape == (1, POLICY_OBSERVATION_SIZE)
-    assert critic.shape == (1, CRITIC_OBSERVATION_SIZE)
+    assert state.shape == (1, STATE_OBSERVATION_SIZE)
     torch.testing.assert_close(policy[0, :3], torch.tensor([1.0, 0.0, 0.0]), atol=1e-6, rtol=0.0)
-    torch.testing.assert_close(critic[0, :7], torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]))
+    torch.testing.assert_close(state[0, :7], torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]))
 
 
 def test_gate_events_require_forward_crossing_and_l1_aperture():

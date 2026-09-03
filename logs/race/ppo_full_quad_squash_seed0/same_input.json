@@ -1,0 +1,22 @@
+{
+  "obs_max_abs_err": {
+    "pos_gate[0:3]": 1.1920928955078125e-07,
+    "vel_gate[3:6]": 2.980232238769531e-07,
+    "rpy_gate[6:9]": 2.384185791015625e-07,
+    "next_rel_pos[9:12]": 3.5762786865234375e-07,
+    "next_rel_yaw[12]": 0.0,
+    "all": 3.5762786865234375e-07
+  },
+  "passed_mismatch": 0,
+  "collision_mismatch": 0,
+  "next_gate_mismatch": 0,
+  "n_passed": 5,
+  "n_collision": 0,
+  "reward_max_abs_err": 0.0,
+  "progress_max_abs_err": 0.0,
+  "jerk_max_abs_err": 0.0,
+  "collision_loss_max_abs_err": 0.0,
+  "reward_vs_pre_update_gate_err": 5.627476215362549,
+  "terminated_is_collision": true,
+  "truncated_not_in_this_probe": "OOB and time-limit live in RaceEnv.step, not racing_core"
+}

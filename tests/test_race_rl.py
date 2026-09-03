@@ -37,7 +37,7 @@ def test_shac_target_critic_is_frozen_and_true_terminal_cost_is_zero():
     for parameter in agent.target_critic.parameters():
         assert parameter.requires_grad is False
     observation, critic_observation = environment.reset(seed=4)
-    critic_observation = critic_observation.detach().requires_grad_(True)
+    critic_observation = observation.detach().requires_grad_(True)
     cost = agent.target_critic(critic_observation)
     cost.sum().backward()
     assert critic_observation.grad is not None
@@ -94,16 +94,30 @@ def test_shac_keeps_terminal_value_on_time_truncation():
     assert stats.actor_grad_norm > 0.0
 
 
+def test_apg_update_changes_parameters_for_both_dynamics():
+    _ensure_genesis()
+    for dynamics in ("native_quad", "full_quad"):
+        environment = RaceEnv(RaceEnvConfig(horizon=2, dynamics=dynamics), num_envs=2, requires_grad=True)
+        agent = make_diff_agent("apg", environment.spec, NetworkConfig(), ApgConfig(horizon=2), gs.device)
+        before = [parameter.detach().clone() for parameter in agent.actor.parameters()]
+        observation = environment.reset_diff(seed=8)
+        normalizer = RunningNormalizer(RaceEnv.policy_observation_dim).to(gs.device)
+        _, stats = agent.update(environment, observation, normalizer)
+        assert torch.isfinite(torch.tensor(stats.actor_loss))
+        assert stats.actor_grad_norm > 0.0
+        assert any(not torch.equal(old, parameter.detach()) for old, parameter in zip(before, agent.actor.parameters()))
+
+
 def test_time_truncation_uses_critic_observation_from_before_reset():
     _ensure_genesis()
     environment = RaceEnv(RaceEnvConfig(horizon=1, max_episode_steps=1), num_envs=2, requires_grad=False)
     observation, critic_observation = environment.reset(seed=5)
-    hover = torch.full((2, 4), environment.controller.hover_action, device=gs.device)
-    hover[:, 1:] = 0.0
+    hover = environment.hover_command(2)
     environment.step(hover)
     next_observation, _, done, extras = environment.step(hover)
     assert extras["truncated"].any()
-    assert extras["critic_observation"].shape[-1] == 34
+    assert extras["state"].shape[-1] == 34
+    assert extras["critic_observation"].shape[-1] == 13
     assert not torch.equal(extras["critic_observation"], extras["critic_observation_live"])
 
     diff_observation = environment.reset_diff(seed=5)

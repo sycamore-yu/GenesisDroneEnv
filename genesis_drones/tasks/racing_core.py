@@ -7,8 +7,8 @@ import torch
 from torch.nn import functional as F
 
 
-POLICY_OBSERVATION_SIZE = 13
-CRITIC_OBSERVATION_SIZE = 34
+POLICY_OBSERVATION_SIZE = 13  # actor; ordinary PPO/SHAC critic also uses this
+STATE_OBSERVATION_SIZE = 34  # privileged state for APPO/SHA2C later; not used by PPO/SHAC
 GATE_APERTURE_L1 = 1.5
 
 
@@ -159,10 +159,10 @@ def racing_observations(
         (position_gate, velocity_gate, rpy_gate, next_relative_position, next_relative_yaw[:, None]), dim=-1
     )
 
-    state = [linear_velocity_world, torch.roll(quaternion, shifts=-1, dims=-1)]
+    state_parts = [linear_velocity_world, torch.roll(quaternion, shifts=-1, dims=-1)]
     for offset in range(3):
-        state.extend(_gate_frame_state(position, quaternion, linear_velocity_world, track, gate_index + offset))
-    return policy, torch.cat(state, dim=-1)
+        state_parts.extend(_gate_frame_state(position, quaternion, linear_velocity_world, track, gate_index + offset))
+    return policy, torch.cat(state_parts, dim=-1)
 
 
 def detect_race_events(

@@ -1,21 +1,19 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
 
 import torch
 
 import genesis as gs
 
-from genesis_drones.controllers.ctbr_controller import CtbrController, CtbrControllerConfig
+from genesis_drones.controllers.ctbr_controller import CtbrControllerConfig
+from genesis_drones.controllers.quad_plant import DroneState, PLANTS, make_quad_plant
 from genesis_drones.envs.differentiable import DiffEnvSpec, DiffObservation, DiffTransition, finish_simulation_window
 from genesis_drones.tasks.racing_core import (
-    CRITIC_OBSERVATION_SIZE,
     POLICY_OBSERVATION_SIZE,
     EvaluationInitialStates,
     RaceTrackSpec,
     detect_race_events,
     generate_initial_states,
-    quaternion_to_rotation_matrix,
     racing_loss_reward,
     racing_observations,
     track_to_tensors,
@@ -35,14 +33,8 @@ class RaceEnvConfig:
     max_target_velocity: float = 10.0
     gamma: float = 0.99
     td_lambda: float = 0.95
+    dynamics: str = "native_quad"
     controller: CtbrControllerConfig = CtbrControllerConfig()
-
-
-class DroneState(NamedTuple):
-    position: torch.Tensor
-    quaternion: torch.Tensor
-    linear_velocity: torch.Tensor
-    angular_velocity_world: torch.Tensor
 
 
 def detached_torch_tensor(value: torch.Tensor) -> torch.Tensor:
@@ -67,16 +59,19 @@ def _detach_cached_torch_tensor(value) -> None:
 class RaceEnv:
     action_dim = 4
     policy_observation_dim = POLICY_OBSERVATION_SIZE
-    critic_observation_dim = CRITIC_OBSERVATION_SIZE
+    # Ordinary PPO/SHAC critic uses the 13D policy observation, not the 34D state.
+    critic_observation_dim = POLICY_OBSERVATION_SIZE
 
     @classmethod
     def spec_from_config(cls, config: RaceEnvConfig) -> DiffEnvSpec:
+        if config.dynamics not in PLANTS:
+            raise ValueError(f"unsupported dynamics: {config.dynamics}")
         return DiffEnvSpec(
             policy_observation_dim=cls.policy_observation_dim,
-            critic_observation_dim=cls.critic_observation_dim,
+            critic_observation_dim=cls.policy_observation_dim,
             action_dim=cls.action_dim,
             horizon=config.horizon,
-            nominal_action=(2.0 / config.controller.max_normalized_thrust - 1.0, 0.0, 0.0, 0.0),
+            nominal_action=PLANTS[config.dynamics].nominal_action(config.controller),
         )
 
     def __init__(
@@ -92,6 +87,10 @@ class RaceEnv:
         self.requires_grad = requires_grad
         self.device = gs.device
         self.track_spec = track
+        self.plant = make_quad_plant(
+            config.dynamics, num_envs, self.device, gs.tc_float, config.dt, config.controller
+        )
+        self.dynamics = self.plant.name
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(
                 dt=config.dt,
@@ -107,7 +106,7 @@ class RaceEnv:
             rigid_options=gs.options.RigidOptions(
                 enable_collision=False,
                 enable_joint_limit=True,
-                batch_links_info=True,
+                batch_links_info=self.plant.batch_links_info,
             ),
             show_viewer=show_viewer,
         )
@@ -122,10 +121,8 @@ class RaceEnv:
         )
         self.gate_entities = add_track_gates(self.scene, track) if show_viewer else []
         self.scene.build(n_envs=num_envs)
-        self.drone.set_dofs_damping([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.plant.attach(self.drone, self.scene)
         self.track = track_to_tensors(track, self.device, gs.tc_float)
-        self.controller = CtbrController(config.controller, num_envs, self.device, gs.tc_float)
-        self._inertia_scale = torch.ones(num_envs, device=self.device, dtype=gs.tc_float)
         self.spec = self.spec_from_config(config)
         self.last_action = torch.zeros((num_envs, self.action_dim), device=self.device, dtype=gs.tc_float)
         self.target_gates = torch.zeros(num_envs, device=self.device, dtype=torch.int64)
@@ -152,21 +149,11 @@ class RaceEnv:
             solver_state.dofs_vel[:, dof_start + 3 : dof_start + 6],
         )
 
-    def _apply_body_params(self, indices: torch.Tensor, environment_indices: torch.Tensor | None) -> None:
-        # ponytail: Genesis set_links_inertia is a scalar ratio, so only Jxy is applied to the solver.
-        # RateController still uses the full (Jxy, Jxy, Jz) tensor. Upgrade if yaw tracking fails.
-        urdf_inertia = 1.4e-3
-        desired_scale = self.controller.inertia[indices, 0] / urdf_inertia
-        ratio = desired_scale / self._inertia_scale[indices].clamp_min(1e-8)
-        self.scene.rigid_solver.set_links_inertia(
-            ratio[:, None], links_idx=[self.drone.base_link_idx], envs_idx=environment_indices
-        )
-        self._inertia_scale[indices] = desired_scale
-        self.drone.set_links_inertial_mass(
-            self.controller.mass[indices, None], links_idx_local=[0], envs_idx=environment_indices
-        )
+    def hover_command(self, count: int | None = None) -> torch.Tensor:
+        return self.plant.hover_command(self.num_envs if count is None else count)
 
     def _observations(self, state: DroneState) -> tuple[torch.Tensor, torch.Tensor]:
+        # Relative-position observation. Camera/LiDAR would replace this call, not PPO/APG/SHAC.
         return racing_observations(
             state.position,
             state.quaternion,
@@ -181,7 +168,7 @@ class RaceEnv:
         self._simulation_forces.clear()
         _detach_cached_torch_tensor(self.scene.rigid_solver.dyn_state.dofs.ctrl_force)
         self.last_action = detached_torch_tensor(self.last_action)
-        self.controller.detach()
+        self.plant.detach()
 
     def _set_initial_states(
         self,
@@ -199,8 +186,8 @@ class RaceEnv:
             torch.cat((linear_velocity, torch.zeros_like(linear_velocity)), dim=-1), envs_idx=environment_indices
         )
         indices = torch.arange(self.num_envs, device=self.device) if environment_indices is None else environment_indices
-        self.controller.randomize(indices, seed=seed)
-        self._apply_body_params(indices, environment_indices)
+        # Task randomizes pose, gate, and target velocity. Dynamics randomizes mass, inertia, and drag.
+        self.plant.reset(indices, seed=seed, environment_indices=environment_indices)
         self.target_gates[indices] = target_gate
         self.last_action[indices] = 0.0
         self.is_alive[indices] = True
@@ -221,28 +208,22 @@ class RaceEnv:
         return self._observations(self._read_state())
 
     def reset_diff(self, seed: int | None = None) -> DiffObservation:
-        policy, critic = self.reset(seed=0 if seed is None else seed)
-        return DiffObservation(policy=policy, critic=critic)
+        policy, _state = self.reset(seed=0 if seed is None else seed)
+        return DiffObservation(policy=policy, critic=policy)
 
     def mix_action(self, action: torch.Tensor, state: DroneState | None = None):
         if state is None:
             state = self._read_state()
-        rotation = quaternion_to_rotation_matrix(state.quaternion)
-        omega_body = torch.einsum("nji,nj->ni", rotation, state.angular_velocity_world)
-        return self.controller.step(action, omega_body, self.is_alive)
+        return self.plant.mix(action, state, self.is_alive)
+
+    def _control_wrench(self, action: torch.Tensor, state: DroneState) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return self.plant.control_wrench(action, state, self.is_alive)
 
     def step(self, action: torch.Tensor):
         action = action.clamp(-1.0, 1.0)
         is_alive_before = self.is_alive.clone()
         state_before = self._read_state()
-        rotation = quaternion_to_rotation_matrix(state_before.quaternion)
-        omega_body = torch.einsum("nji,nj->ni", rotation, state_before.angular_velocity_world)
-        output = self.controller.step(action, omega_body, self.is_alive)
-        body_velocity = torch.einsum("nji,nj->ni", rotation, state_before.linear_velocity)
-        drag_world = torch.einsum("nij,nj->ni", rotation, -self.controller.drag * body_velocity)
-        force_world = rotation[:, :, 2] * output.wrench[:, :1] + drag_world
-        torque_world = torch.einsum("nij,nj->ni", rotation, output.wrench[:, 1:])
-        generalized_force = torch.cat((force_world, torque_world), dim=-1)
+        generalized_force, wrench, motor_thrust = self._control_wrench(action, state_before)
         if generalized_force.requires_grad:
             if isinstance(generalized_force, gs.Tensor):
                 generalized_force.scene = None
@@ -253,6 +234,7 @@ class RaceEnv:
         self.scene.step()
 
         state = self._read_state()
+        self.plant.after_step(state, is_alive_before)
         events = detect_race_events(
             state_before.position,
             state.position,
@@ -286,16 +268,16 @@ class RaceEnv:
             state.position - state_before.position, dim=-1
         ) * is_alive_before
 
-        critic_observation_before_reset = self._observations(state)[1]
+        policy_before_reset, state_before_reset = self._observations(state)
         episode_length = self.episode_length_buf.clone()
         passed_gates = self.n_passed_gates.clone()
         if self.respawn_on_fail and not self.requires_grad:
             reset_idx = done.nonzero(as_tuple=False).flatten()
             if reset_idx.numel() > 0:
                 self._reset_envs(reset_idx)
-            policy_observation, critic_observation = self._observations(self._read_state())
+            policy_observation, state_observation = self._observations(self._read_state())
         else:
-            policy_observation, critic_observation = self._observations(state)
+            policy_observation, state_observation = policy_before_reset, state_before_reset
         extras = {
             "terminated": terminated.detach(),
             "truncated": truncated.detach(),
@@ -307,11 +289,12 @@ class RaceEnv:
             "target_gate": self.target_gates.detach(),
             "n_passed_gates": passed_gates.detach(),
             "episode_length": episode_length.detach(),
-            "critic_observation": critic_observation_before_reset,
-            "critic_observation_live": critic_observation,
-            "actual_wrench": output.wrench,
-            "motor_thrust": output.motor_thrust,
-            "command": output.command,
+            "critic_observation": policy_before_reset,
+            "critic_observation_live": policy_observation,
+            "state": state_before_reset,
+            "state_live": state_observation,
+            "actual_wrench": wrench,
+            "motor_thrust": motor_thrust,
             "loss_components": {key: value.detach() for key, value in loss_components.items()},
         }
         return policy_observation, (physics_loss, policy_loss, reward), done.detach(), extras
@@ -348,7 +331,8 @@ class RaceEnv:
             reset_idx = (~self.is_alive).nonzero(as_tuple=False).flatten()
             if reset_idx.numel() > 0:
                 self._reset_envs(reset_idx)
-        return tuple(map(detached_torch_tensor, self._observations(self._read_state())))
+        policy, _state = self._observations(self._read_state())
+        return detached_torch_tensor(policy), detached_torch_tensor(policy)
 
     def finish_window(
         self,

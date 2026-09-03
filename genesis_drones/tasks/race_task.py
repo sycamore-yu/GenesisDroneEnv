@@ -14,7 +14,10 @@ class RaceTask(VecEnv):
         self.episode_length_buf = environment.episode_length_buf
         self.device = environment.device
         self.cfg = train_config
-        self.policy_observation, self.critic_observation = environment.reset()
+        policy, _state = environment.reset()
+        self.policy_observation = detached_torch_tensor(policy)
+        # Ordinary PPO critic reads 13D policy observation, not 34D state.
+        self.critic_observation = detached_torch_tensor(policy)
 
     def get_observations(self) -> TensorDict:
         return TensorDict(
@@ -24,8 +27,8 @@ class RaceTask(VecEnv):
 
     def step(self, actions: torch.Tensor):
         policy, (_, _, reward), done, extras = self.environment.step(actions)
-        self.policy_observation = policy
-        self.critic_observation = extras["critic_observation_live"]
+        self.policy_observation = detached_torch_tensor(policy)
+        self.critic_observation = detached_torch_tensor(extras["critic_observation_live"])
         extras_out = {"time_outs": detached_torch_tensor(extras["truncated"])}
         if done.any():
             reset = done.bool()
@@ -45,5 +48,7 @@ class RaceTask(VecEnv):
         )
 
     def reset(self):
-        self.policy_observation, self.critic_observation = self.environment.reset()
+        policy, _state = self.environment.reset()
+        self.policy_observation = detached_torch_tensor(policy)
+        self.critic_observation = detached_torch_tensor(policy)
         return self.get_observations()
