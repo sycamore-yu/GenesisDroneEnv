@@ -1,0 +1,139 @@
+{
+  "first_arrival_rate": {
+    "mean": 0.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 0.0,
+    "confidence_interval_high": 0.0
+  },
+  "waypoint_count": {
+    "mean": 0.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 0.0,
+    "confidence_interval_high": 0.0
+  },
+  "waypoints_per_minute": {
+    "mean": 0.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 0.0,
+    "confidence_interval_high": 0.0
+  },
+  "capped_first_arrival_time": {
+    "mean": 39.99330139160156,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 39.99330139160156,
+    "confidence_interval_high": 39.99330139160156
+  },
+  "successful_first_arrival_time": {
+    "mean": NaN,
+    "standard_deviation": NaN,
+    "confidence_interval_low": NaN,
+    "confidence_interval_high": NaN
+  },
+  "successful_arrival_count": 0,
+  "crash_rate": {
+    "mean": 1.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 1.0,
+    "confidence_interval_high": 1.0
+  },
+  "survival_time": {
+    "mean": 3.496500015258789,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 3.496500015258789,
+    "confidence_interval_high": 3.496500015258789
+  },
+  "mean_position_error": {
+    "mean": 12.545086860656738,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 12.545086860656738,
+    "confidence_interval_high": 12.545086860656738
+  },
+  "mean_inter_waypoint_time": {
+    "mean": 0.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 0.0,
+    "confidence_interval_high": 0.0
+  },
+  "median_inter_waypoint_time": {
+    "mean": 0.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 0.0,
+    "confidence_interval_high": 0.0
+  },
+  "mean_speed": {
+    "mean": 10.512374877929688,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 10.512374877929688,
+    "confidence_interval_high": 10.512374877929688
+  },
+  "p95_speed": {
+    "mean": 19.757081985473633,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 19.757081985473633,
+    "confidence_interval_high": 19.757081985473633
+  },
+  "max_speed": {
+    "mean": 20.800983428955078,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 20.800983428955078,
+    "confidence_interval_high": 20.800983428955078
+  },
+  "mean_closing_velocity": {
+    "mean": -10.127785682678223,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": -10.127785682678223,
+    "confidence_interval_high": -10.127785682678223
+  },
+  "p95_closing_velocity": {
+    "mean": -0.04455304145812988,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": -0.04455304145812988,
+    "confidence_interval_high": -0.04455304145812988
+  },
+  "path_length": {
+    "mean": 36.756526947021484,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 36.756526947021484,
+    "confidence_interval_high": 36.756526947021484
+  },
+  "straight_line_distance": {
+    "mean": 0.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 0.0,
+    "confidence_interval_high": 0.0
+  },
+  "path_efficiency": {
+    "mean": 1.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 1.0,
+    "confidence_interval_high": 1.0
+  },
+  "excess_path_ratio": {
+    "mean": 1.0,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 1.0,
+    "confidence_interval_high": 1.0
+  },
+  "action_total_variation": {
+    "mean": 15.83240032196045,
+    "standard_deviation": 0.0,
+    "confidence_interval_low": 15.83240032196045,
+    "confidence_interval_high": 15.83240032196045
+  },
+  "task": "tracking",
+  "dynamics": "native_quad",
+  "algorithm": "ppo",
+  "network": "mlp",
+  "sensor": "state",
+  "seed": 0,
+  "environment": {
+    "dt": 0.01,
+    "horizon": 2,
+    "max_episode_steps": 8
+  },
+  "algorithm_config": {},
+  "schema_version": 1,
+  "git_commit": null,
+  "created_at": "2026-09-03T05:04:42.755245+00:00",
+  "protocol": "scenarios"
+}

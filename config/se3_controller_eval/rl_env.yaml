@@ -52,7 +52,7 @@ train:
   run_name:  
   runner_class_name: runner_class_name 
   save_interval: 100
-  obs_groups: {"policy": ["state"], "critic": ["state"]} # maps observation groups to types. See `vec_env.py` for more information
+  obs_groups: {"actor": ["policy"], "critic": ["policy"]}
 
 
   algorithm: 
@@ -72,12 +72,20 @@ train:
           
   init_member_classes: {}
 
-  policy: 
-    class_name: ActorCritic 
-    activation: tanh 
-    actor_hidden_dims: [128, 128, 128] 
-    critic_hidden_dims: [128, 128, 128] 
-    init_noise_std: 0.5 
+  actor:
+    class_name: MLPModel
+    hidden_dims: [128, 128, 128]
+    activation: tanh
+    obs_normalization: false
+    distribution_cfg:
+      class_name: GaussianDistribution
+      init_std: 0.5
+      std_type: scalar
+  critic:
+    class_name: MLPModel
+    hidden_dims: [128, 128, 128]
+    activation: tanh
+    obs_normalization: false 
 
 
   runner_class_name: OnPolicyRunner 

@@ -1,0 +1,31 @@
+{
+  "task": "tracking",
+  "dynamics": "native_quad",
+  "algorithm": "shac",
+  "network": "mlp",
+  "sensor": "state",
+  "seed": 0,
+  "environment": {
+    "dt": 0.01,
+    "horizon": 2,
+    "max_episode_steps": 8
+  },
+  "algorithm_config": {
+    "horizon": 2,
+    "actor_learning_rate": 0.001,
+    "critic_learning_rate": 0.001,
+    "gamma": 0.99,
+    "td_lambda": 0.95,
+    "entropy_weight": 0.0,
+    "actor_max_grad_norm": 1.0,
+    "critic_max_grad_norm": 1.0,
+    "critic_minibatches": 2,
+    "critic_iterations": 1,
+    "target_update_rate": 0.005,
+    "log_standard_deviation_min": -5.0,
+    "log_standard_deviation_max": -1.0
+  },
+  "schema_version": 1,
+  "git_commit": null,
+  "created_at": "2026-09-03T05:00:16.820816+00:00"
+}

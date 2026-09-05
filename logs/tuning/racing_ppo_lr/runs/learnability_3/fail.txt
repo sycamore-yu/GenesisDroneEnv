@@ -1,0 +1,31 @@
+libEGL warning: failed to open /dev/dri/renderD128: Permission denied
+
+libEGL warning: failed to open /dev/dri/renderD128: Permission denied
+
+libEGL warning: failed to open /dev/dri/card1: Permission denied
+
+
+[38;5;226m[Genesis] [03:59:30] [WARNING] Some free joint has non-zero frictionloss, damping or armature parameters. Beware it is non-physical.[0m
+[38;5;226m[Genesis] [03:59:30] [WARNING] Mesh is not watertight. Falling back to convex hull for estimating inertial properties.[0m
+[38;5;226m[Genesis] [03:59:30] [WARNING] Mesh is not watertight. Falling back to convex hull for estimating inertial properties.[0m
+[38;5;226m[Genesis] [03:59:30] [WARNING] Mesh is not watertight. Falling back to convex hull for estimating inertial properties.[0m
+[38;5;226m[Genesis] [03:59:30] [WARNING] Mesh is not watertight. Falling back to convex hull for estimating inertial properties.[0m
+Traceback (most recent call last):
+  File "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/scripts/train/race_train.py", line 197, in <module>
+    main()
+  File "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/scripts/train/race_train.py", line 191, in main
+    train_ppo(args, data, log_dir)
+  File "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/scripts/train/race_train.py", line 126, in train_ppo
+    task = RslRlAdapter(race.env, train_config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/genesis_drones/adapters/rsl_rl_adapter.py", line 19, in __init__
+    policy, _state = environment.reset()
+                     ^^^^^^^^^^^^^^^^^^^
+  File "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/genesis_drones/envs/genesis_task_env.py", line 173, in reset
+    self._set_initial_states(initial_states, seed=seed, waypoint_sequences=waypoint_sequences)
+  File "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/genesis_drones/envs/genesis_task_env.py", line 153, in _set_initial_states
+    initial_states = self.task.reset_task(
+                     ^^^^^^^^^^^^^^^^^^^^^
+TypeError: RacingCore.reset_task() got an unexpected keyword argument 'waypoint_sequences'
+
+[38;5;9m[Genesis] [03:59:36] [ERROR] TypeError: RacingCore.reset_task() got an unexpected keyword argument 'waypoint_sequences'[0m

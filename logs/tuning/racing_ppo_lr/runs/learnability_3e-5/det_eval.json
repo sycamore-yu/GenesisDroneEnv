@@ -1,0 +1,28 @@
+{
+  "success_rate": 0.0,
+  "collision_rate": 0.5,
+  "analytic_collision_rate": 0.5,
+  "mean_completion_time": 0.0,
+  "mean_gates_passed": 0.42,
+  "mean_speed": 1.861210782751035,
+  "mean_path_efficiency": 0.043083509741144964,
+  "count": 100,
+  "checksum": "8c975c09876e669b947411e67e2d3dc0ae6e971c0736874b27fe55e70b01b807",
+  "algorithm": "ppo",
+  "dynamics": "full_quad",
+  "task": "racing",
+  "network": "mlp",
+  "sensor": "relative_position",
+  "contract": {
+    "track": "diffaero_racing",
+    "action": "normalized_4d",
+    "policy_observation_size": 13,
+    "critic_observation_size": 13,
+    "state_observation_size": 34,
+    "dt": 0.0333,
+    "max_episode_steps": 1201,
+    "gamma": 0.99,
+    "td_lambda": 0.95
+  },
+  "protocol": "fixed_states"
+}

@@ -23,9 +23,12 @@ def _write_tb(log_dir: Path, *, kl=0.01, lr=1.0e-4, mu=0.5, std=0.23, sat=0.1):
     writer.add_scalar("Loss/learning_rate", lr, 0)
     writer.add_scalar("Loss/kl", kl, 0)
     writer.add_scalar("Loss/mu_abs_mean", mu, 0)
+    writer.add_scalar("Policy/mean_std", std, 0)
     writer.add_scalar("Policy/mean_noise_std", std, 0)
     writer.add_scalar("Policy/sat_frac", sat, 0)
+    writer.add_scalar("Loss/entropy", 1.2, 0)
     writer.add_scalar("Loss/surrogate", 0.01, 0)
+    writer.add_scalar("Loss/value", 10.0, 0)
     writer.add_scalar("Loss/value_function", 10.0, 0)
     writer.close()
 
@@ -59,7 +62,7 @@ def test_trial_does_not_modify_official_yaml(tmp_path):
     tune.write_trial_ppo_config(3.0e-4, tmp_path / "ppo.yaml")
     assert tune.SOURCE_PPO_YAML.read_bytes() == before
     source = yaml.safe_load(before)
-    assert source["algorithm"]["learning_rate"] == pytest.approx(0.0026)
+    assert source["algorithm"]["learning_rate"] == pytest.approx(0.0002110721108616641)
 
 
 def test_reads_metrics_from_completed_run():
@@ -164,3 +167,94 @@ def test_smoke_calls_existing_race_train(tmp_path):
     experiment = json.loads((dest / "experiment.json").read_text())
     assert experiment["algorithm"] == "ppo"
     assert experiment["dynamics"] == "full_quad"
+
+
+def test_write_trial_sets_stage1_fields(tmp_path):
+    dest = tmp_path / "ppo.yaml"
+    tune.write_trial_ppo_config(
+        1.0e-4,
+        dest,
+        desired_kl=0.02,
+        entropy_coef=0.0,
+        init_std=0.3,
+    )
+    data = yaml.safe_load(dest.read_text())
+    assert data["algorithm"]["learning_rate"] == pytest.approx(1.0e-4)
+    assert data["algorithm"]["desired_kl"] == pytest.approx(0.02)
+    assert data["algorithm"]["entropy_coef"] == pytest.approx(0.0)
+    assert data["actor"]["distribution_cfg"]["init_std"] == pytest.approx(0.3)
+    source = yaml.safe_load(tune.SOURCE_PPO_YAML.read_text())
+    assert source["algorithm"]["entropy_coef"] == pytest.approx(0.00875174422525385)
+    assert source["algorithm"]["desired_kl"] == pytest.approx(0.015906451881642775)
+
+
+def test_stage1_objective_uses_fixed_state_det_gates(tmp_path, monkeypatch):
+    import optuna
+
+    states = tmp_path / "states.pt"
+    states.write_bytes(b"ok")
+    args = tune.parse_args(
+        [
+            "--phase",
+            "stage1",
+            "--n-trials",
+            "1",
+            "--updates",
+            "200",
+            "--study-name",
+            "stage1-mock",
+            "--eval-states",
+            str(states),
+        ]
+    )
+    state = tune._StudyState(args, tmp_path, "stage1", timeout=30)
+
+    def fake_run(command, timeout):
+        log_dir = Path(command[command.index("--log-dir") + 1])
+        log_dir.mkdir(parents=True, exist_ok=True)
+        if "race_rslrl55_curve.py" in command[1]:
+            output = Path(command[command.index("--output") + 1])
+            output.write_text(
+                json.dumps(
+                    {
+                        "checkpoints": [
+                            {
+                                "iteration": 200,
+                                "deterministic": {
+                                    "mean_passed_gates": 2.4,
+                                    "collision": 0.3,
+                                    "mean_episode_time": 4.0,
+                                    "mean_episode_return": 10.0,
+                                    "policy": {"raw_gt1_fraction": 0.01},
+                                },
+                                "stochastic": {
+                                    "mean_passed_gates": 2.1,
+                                    "collision": 0.4,
+                                    "policy": {"raw_gt1_fraction": 0.02},
+                                },
+                            }
+                        ]
+                    }
+                )
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+        _write_tb(log_dir, kl=0.01, lr=3.0e-4, mu=0.4, std=0.3, sat=0.05)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(tune, "run_command", fake_run)
+    study = optuna.create_study(direction="maximize")
+    study.enqueue_trial(
+        {
+            "learning_rate": 3.0e-4,
+            "desired_kl": 0.01,
+            "entropy_coef": 0.01,
+            "init_std": 0.2231301601,
+        }
+    )
+    study.optimize(lambda trial: tune.stage1_objective(trial, state), n_trials=1, catch=())
+    trial = study.trials[0]
+    assert trial.state.name == "COMPLETE"
+    assert trial.value == pytest.approx(2.4)
+    assert trial.user_attrs["sto_gates"] == pytest.approx(2.1)
+    assert (tmp_path / "runs" / "stage1_0" / "trial.json").exists()
+

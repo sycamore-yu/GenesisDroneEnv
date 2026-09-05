@@ -1,0 +1,20 @@
+{
+  "task": "racing",
+  "dynamics": "full_quad",
+  "algorithm": "ppo",
+  "network": "mlp",
+  "sensor": "relative_position",
+  "seed": 0,
+  "environment": {
+    "dynamics": "full_quad",
+    "dt": 0.0333,
+    "horizon": 32,
+    "max_episode_steps": 1201,
+    "gamma": 0.99,
+    "td_lambda": 0.95
+  },
+  "algorithm_config": {},
+  "schema_version": 1,
+  "git_commit": null,
+  "created_at": "2026-09-03T15:34:31.017953+00:00"
+}

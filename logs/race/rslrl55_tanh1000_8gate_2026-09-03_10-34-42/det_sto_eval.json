@@ -1,0 +1,511 @@
+{
+  "checksum": "8c975c09876e669b947411e67e2d3dc0ae6e971c0736874b27fe55e70b01b807",
+  "states_source": "generated:logs/race/rslrl55_tanh1000_8gate_2026-09-03_10-34-42/eval_states_8gate_seed20250830.pt",
+  "n_states": 100,
+  "checkpoints": [
+    {
+      "iteration": 0,
+      "path": "logs/race/rslrl55_tanh1000_8gate_2026-09-03_10-34-42/model_init.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.0,
+        "survival": 1.0,
+        "timeout_success": 0.0,
+        "collision": 0.0,
+        "mean_episode_time": 0.9317339658737183,
+        "mean_episode_return": -49.16044998168945,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.14461080729961395,
+            0.22012820839881897,
+            0.528719425201416,
+            0.09078686684370041
+          ],
+          "std": [
+            0.2231302261352539,
+            0.2231302261352539,
+            0.2231302261352539,
+            0.2231302261352539
+          ],
+          "raw_abs_mean": [
+            0.14461080729961395,
+            0.22012820839881897,
+            0.528719425201416,
+            0.09078686684370041
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.0,
+        "survival": 1.0,
+        "timeout_success": 0.0,
+        "collision": 0.0,
+        "mean_episode_time": 0.9260729551315308,
+        "mean_episode_return": -49.47527313232422,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.1457180380821228,
+            0.2186480015516281,
+            0.5335652828216553,
+            0.09521769732236862
+          ],
+          "std": [
+            0.2231302410364151,
+            0.2231302410364151,
+            0.2231302410364151,
+            0.2231302410364151
+          ],
+          "raw_abs_mean": [
+            0.21523550152778625,
+            0.26468661427497864,
+            0.5328181385993958,
+            0.19257862865924835
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 50,
+      "path": "logs/race/rslrl55_tanh1000_8gate_2026-09-03_10-34-42/model_50.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.0,
+        "survival": 0.6899999976158142,
+        "timeout_success": 0.0,
+        "collision": 0.3100000023841858,
+        "mean_episode_time": 2.465865135192871,
+        "mean_episode_return": -48.20085525512695,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5911145210266113,
+            0.14293518662452698,
+            0.22006799280643463,
+            0.07262403517961502
+          ],
+          "std": [
+            0.21715758740901947,
+            0.2391759306192398,
+            0.23391662538051605,
+            0.23315034806728363
+          ],
+          "raw_abs_mean": [
+            0.5911145210266113,
+            0.14293518662452698,
+            0.22006799280643463,
+            0.07262403517961502
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.07000000029802322,
+        "survival": 0.7099999785423279,
+        "timeout_success": 0.0,
+        "collision": 0.28999999165534973,
+        "mean_episode_time": 2.696967124938965,
+        "mean_episode_return": -50.09633255004883,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.6050215363502502,
+            0.13741783797740936,
+            0.2094407081604004,
+            0.08472219854593277
+          ],
+          "std": [
+            0.21715769171714783,
+            0.23917566239833832,
+            0.23391643166542053,
+            0.23315034806728363
+          ],
+          "raw_abs_mean": [
+            0.5885125994682312,
+            0.23459117114543915,
+            0.27248138189315796,
+            0.20201121270656586
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 100,
+      "path": "logs/race/rslrl55_tanh1000_8gate_2026-09-03_10-34-42/model_100.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.14000000059604645,
+        "survival": 0.5899999737739563,
+        "timeout_success": 0.0,
+        "collision": 0.4099999964237213,
+        "mean_episode_time": 2.8158481121063232,
+        "mean_episode_return": -50.41237258911133,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5608330965042114,
+            0.1931934505701065,
+            0.0885935127735138,
+            0.11344993114471436
+          ],
+          "std": [
+            0.23988817632198334,
+            0.26732951402664185,
+            0.2588207423686981,
+            0.2652393877506256
+          ],
+          "raw_abs_mean": [
+            0.5608330965042114,
+            0.1931934505701065,
+            0.0885935127735138,
+            0.11344993114471436
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.07999999821186066,
+        "survival": 0.5600000023841858,
+        "timeout_success": 0.0,
+        "collision": 0.4399999976158142,
+        "mean_episode_time": 2.588076114654541,
+        "mean_episode_return": -44.40594482421875,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5848143100738525,
+            0.1722845435142517,
+            0.11033476144075394,
+            0.10383038222789764
+          ],
+          "std": [
+            0.23988811671733856,
+            0.26732969284057617,
+            0.2588210701942444,
+            0.26523953676223755
+          ],
+          "raw_abs_mean": [
+            0.5627495050430298,
+            0.2581120729446411,
+            0.22448047995567322,
+            0.2191624492406845
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 150,
+      "path": "logs/race/rslrl55_tanh1000_8gate_2026-09-03_10-34-42/model_150.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.3100000023841858,
+        "survival": 0.41999998688697815,
+        "timeout_success": 0.0,
+        "collision": 0.5799999833106995,
+        "mean_episode_time": 2.1125519275665283,
+        "mean_episode_return": -26.926279067993164,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5188089609146118,
+            0.16565443575382233,
+            0.196186363697052,
+            0.07063214480876923
+          ],
+          "std": [
+            0.25301358103752136,
+            0.29492026567459106,
+            0.2915392816066742,
+            0.3022952377796173
+          ],
+          "raw_abs_mean": [
+            0.5188089609146118,
+            0.16565443575382233,
+            0.196186363697052,
+            0.07063214480876923
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.5799999833106995,
+        "survival": 0.6200000047683716,
+        "timeout_success": 0.0,
+        "collision": 0.4099999964237213,
+        "mean_episode_time": 2.2344300746917725,
+        "mean_episode_return": -25.95524787902832,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5422870516777039,
+            0.17425397038459778,
+            0.18460272252559662,
+            0.07511776685714722
+          ],
+          "std": [
+            0.2530134320259094,
+            0.29492029547691345,
+            0.29153919219970703,
+            0.30229493975639343
+          ],
+          "raw_abs_mean": [
+            0.5305132269859314,
+            0.2743987739086151,
+            0.2838149666786194,
+            0.23709207773208618
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 200,
+      "path": "logs/race/rslrl55_tanh1000_8gate_2026-09-03_10-34-42/model_200.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.8700000047683716,
+        "survival": 0.5600000023841858,
+        "timeout_success": 0.0,
+        "collision": 0.4399999976158142,
+        "mean_episode_time": 2.2227749824523926,
+        "mean_episode_return": -15.978315353393555,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.574813723564148,
+            0.162801131606102,
+            0.22842633724212646,
+            0.14973300695419312
+          ],
+          "std": [
+            0.27918684482574463,
+            0.3439008593559265,
+            0.3353624641895294,
+            0.3413422703742981
+          ],
+          "raw_abs_mean": [
+            0.574813723564148,
+            0.162801131606102,
+            0.22842633724212646,
+            0.14973300695419312
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.8799999952316284,
+        "survival": 0.6699999570846558,
+        "timeout_success": 0.0,
+        "collision": 0.3400000035762787,
+        "mean_episode_time": 2.2094550132751465,
+        "mean_episode_return": -18.18108367919922,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5924952626228333,
+            0.1765047162771225,
+            0.22913722693920135,
+            0.13875021040439606
+          ],
+          "std": [
+            0.2791876196861267,
+            0.34390023350715637,
+            0.33536210656166077,
+            0.34134164452552795
+          ],
+          "raw_abs_mean": [
+            0.5732405185699463,
+            0.30478164553642273,
+            0.32292014360427856,
+            0.28189313411712646
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 7.423904753522947e-05,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 350,
+      "path": "logs/race/rslrl55_tanh1000_8gate_2026-09-03_10-34-42/model_350.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 1.2300000190734863,
+        "survival": 0.5600000023841858,
+        "timeout_success": 0.0,
+        "collision": 0.4399999976158142,
+        "mean_episode_time": 2.4109199047088623,
+        "mean_episode_return": -16.497882843017578,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5539776086807251,
+            0.27545180916786194,
+            0.26451945304870605,
+            0.1422322392463684
+          ],
+          "std": [
+            0.45077481865882874,
+            0.7464200258255005,
+            0.7017966508865356,
+            0.656279444694519
+          ],
+          "raw_abs_mean": [
+            0.5539776086807251,
+            0.27545180916786194,
+            0.26451945304870605,
+            0.1422322392463684
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 1.1200000047683716,
+        "survival": 0.7699999809265137,
+        "timeout_success": 0.0,
+        "collision": 0.23999999463558197,
+        "mean_episode_time": 2.524806022644043,
+        "mean_episode_return": -16.603017807006836,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.6242337226867676,
+            0.26389163732528687,
+            0.2773131728172302,
+            0.13972021639347076
+          ],
+          "std": [
+            0.4507747292518616,
+            0.7464202642440796,
+            0.7017967104911804,
+            0.6562789678573608
+          ],
+          "raw_abs_mean": [
+            0.5812196731567383,
+            0.4934879541397095,
+            0.4852314889431,
+            0.4381663501262665
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0003579797048587352,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 400,
+      "path": "logs/race/rslrl55_tanh1000_8gate_2026-09-03_10-34-42/model_400.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 1.3299999237060547,
+        "survival": 0.6100000143051147,
+        "timeout_success": 0.0,
+        "collision": 0.38999998569488525,
+        "mean_episode_time": 2.6906399726867676,
+        "mean_episode_return": -9.575850486755371,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5742992162704468,
+            0.2699311673641205,
+            0.29524853825569153,
+            0.14688506722450256
+          ],
+          "std": [
+            0.47026824951171875,
+            0.8153804540634155,
+            0.7693356275558472,
+            0.7214759588241577
+          ],
+          "raw_abs_mean": [
+            0.5742992162704468,
+            0.2699311673641205,
+            0.29524853825569153,
+            0.14688506722450256
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 1.2999999523162842,
+        "survival": 0.7699999809265137,
+        "timeout_success": 0.0,
+        "collision": 0.23999999463558197,
+        "mean_episode_time": 2.8198440074920654,
+        "mean_episode_return": -14.046116828918457,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.6345340013504028,
+            0.2765643894672394,
+            0.31034156680107117,
+            0.16774433851242065
+          ],
+          "std": [
+            0.4702679216861725,
+            0.815380334854126,
+            0.7693350315093994,
+            0.7214754819869995
+          ],
+          "raw_abs_mean": [
+            0.5958335995674133,
+            0.5206412076950073,
+            0.5190594792366028,
+            0.47119247913360596
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0024801588151603937,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    }
+  ]
+}

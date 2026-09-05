@@ -1,0 +1,367 @@
+{
+  "checksum": "8c975c09876e669b947411e67e2d3dc0ae6e971c0736874b27fe55e70b01b807",
+  "states_source": "logs/race/eval_states_8gate_seed20250830.pt",
+  "n_states": 100,
+  "checkpoints": [
+    {
+      "iteration": 100,
+      "path": "logs/tuning/racing_ppo_opt55/stage2/stage1_3_seed1_500/model_100.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 1.1899999380111694,
+        "survival": 0.3799999952316284,
+        "timeout_success": 0.0,
+        "collision": 0.6200000047683716,
+        "mean_episode_time": 3.254741668701172,
+        "mean_episode_return": -15.099064826965332,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5722084641456604,
+            0.22772909700870514,
+            0.23828932642936707,
+            0.20464354753494263
+          ],
+          "std": [
+            0.6855629086494446,
+            0.8514801263809204,
+            0.8847320079803467,
+            0.9963451623916626
+          ],
+          "raw_abs_mean": [
+            0.5722084641456604,
+            0.22772909700870514,
+            0.23828932642936707,
+            0.20464354753494263
+          ],
+          "raw_gt1_fraction": 0.010127607733011246,
+          "near_bound_fraction": 0.010558030568063259,
+          "env_clip_change_mean": 0.002790197031572461
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 1.0299999713897705,
+        "survival": 0.5899999737739563,
+        "timeout_success": 0.0,
+        "collision": 0.41999998688697815,
+        "mean_episode_time": 3.214116096496582,
+        "mean_episode_return": -22.93366241455078,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.8135156035423279,
+            0.3009636700153351,
+            0.31437936425209045,
+            0.27146780490875244
+          ],
+          "std": [
+            0.6855630278587341,
+            0.8514806628227234,
+            0.8847315907478333,
+            0.9963461756706238
+          ],
+          "raw_abs_mean": [
+            0.923825740814209,
+            0.7435692548751831,
+            0.7689024806022644,
+            0.8550513982772827
+          ],
+          "raw_gt1_fraction": 0.33413657546043396,
+          "near_bound_fraction": 0.33908429741859436,
+          "env_clip_change_mean": 0.18018940091133118
+        }
+      }
+    },
+    {
+      "iteration": 200,
+      "path": "logs/tuning/racing_ppo_opt55/stage2/stage1_3_seed1_500/model_200.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 4.360000133514404,
+        "survival": 0.4099999964237213,
+        "timeout_success": 0.0,
+        "collision": 0.5899999737739563,
+        "mean_episode_time": 6.612048149108887,
+        "mean_episode_return": 17.503080368041992,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5722926259040833,
+            1.115836262702942,
+            0.9225196242332458,
+            0.5258955359458923
+          ],
+          "std": [
+            1.0705838203430176,
+            1.0803781747817993,
+            1.0414880514144897,
+            1.818100094795227
+          ],
+          "raw_abs_mean": [
+            0.5722926259040833,
+            1.115836262702942,
+            0.9225196242332458,
+            0.5258955359458923
+          ],
+          "raw_gt1_fraction": 0.22027210891246796,
+          "near_bound_fraction": 0.2216501384973526,
+          "env_clip_change_mean": 0.20715822279453278
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 4.569999694824219,
+        "survival": 0.429999977350235,
+        "timeout_success": 0.0,
+        "collision": 0.5899999737739563,
+        "mean_episode_time": 7.526799201965332,
+        "mean_episode_return": 22.404542922973633,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            1.1528388261795044,
+            1.1220438480377197,
+            1.0592436790466309,
+            0.5944323539733887
+          ],
+          "std": [
+            1.0705757141113281,
+            1.0803738832473755,
+            1.041485071182251,
+            1.818090558052063
+          ],
+          "raw_abs_mean": [
+            1.3943735361099243,
+            1.4536687135696411,
+            1.3498210906982422,
+            1.5752952098846436
+          ],
+          "raw_gt1_fraction": 0.577886164188385,
+          "near_bound_fraction": 0.5820155739784241,
+          "env_clip_change_mean": 0.6595075726509094
+        }
+      }
+    },
+    {
+      "iteration": 300,
+      "path": "logs/tuning/racing_ppo_opt55/stage2/stage1_3_seed1_500/model_300.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 4.279999732971191,
+        "survival": 0.32999998331069946,
+        "timeout_success": 0.0,
+        "collision": 0.6699999570846558,
+        "mean_episode_time": 5.132862567901611,
+        "mean_episode_return": 14.303324699401855,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.6122531294822693,
+            1.460412621498108,
+            1.664916753768921,
+            1.5009355545043945
+          ],
+          "std": [
+            1.1037566661834717,
+            1.1920392513275146,
+            1.1065571308135986,
+            2.689870834350586
+          ],
+          "raw_abs_mean": [
+            0.6122531294822693,
+            1.460412621498108,
+            1.664916753768921,
+            1.5009355545043945
+          ],
+          "raw_gt1_fraction": 0.4244714677333832,
+          "near_bound_fraction": 0.4277910590171814,
+          "env_clip_change_mean": 0.6001181602478027
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 12.819999694824219,
+        "survival": 0.4899999797344208,
+        "timeout_success": 0.029999999329447746,
+        "collision": 0.5199999809265137,
+        "mean_episode_time": 14.253398895263672,
+        "mean_episode_return": 146.3248748779297,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            1.269372820854187,
+            1.2451467514038086,
+            1.3221189975738525,
+            1.422219157218933
+          ],
+          "std": [
+            1.1037557125091553,
+            1.1920286417007446,
+            1.1065621376037598,
+            2.68986439704895
+          ],
+          "raw_abs_mean": [
+            1.5282987356185913,
+            1.5933891534805298,
+            1.5914016962051392,
+            2.5922582149505615
+          ],
+          "raw_gt1_fraction": 0.6486026644706726,
+          "near_bound_fraction": 0.6518309116363525,
+          "env_clip_change_mean": 1.0058131217956543
+        }
+      }
+    },
+    {
+      "iteration": 400,
+      "path": "logs/tuning/racing_ppo_opt55/stage2/stage1_3_seed1_500/model_400.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 6.960000038146973,
+        "survival": 0.22999998927116394,
+        "timeout_success": 0.0,
+        "collision": 0.7699999809265137,
+        "mean_episode_time": 7.419905662536621,
+        "mean_episode_return": 62.716678619384766,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.634854793548584,
+            1.7543166875839233,
+            1.6649835109710693,
+            2.4330410957336426
+          ],
+          "std": [
+            1.3736999034881592,
+            1.4171290397644043,
+            1.256029725074768,
+            3.82297682762146
+          ],
+          "raw_abs_mean": [
+            0.634854793548584,
+            1.7543166875839233,
+            1.6649835109710693,
+            2.4330410957336426
+          ],
+          "raw_gt1_fraction": 0.4748011827468872,
+          "near_bound_fraction": 0.47772765159606934,
+          "env_clip_change_mean": 0.8804516196250916
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 14.90999984741211,
+        "survival": 0.32999998331069946,
+        "timeout_success": 0.10999999940395355,
+        "collision": 0.6699999570846558,
+        "mean_episode_time": 15.269048690795898,
+        "mean_episode_return": 194.44015502929688,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            1.5729076862335205,
+            1.515904188156128,
+            1.578205943107605,
+            2.384289264678955
+          ],
+          "std": [
+            1.3736841678619385,
+            1.41713285446167,
+            1.2560232877731323,
+            3.822911262512207
+          ],
+          "raw_abs_mean": [
+            1.8941333293914795,
+            1.916684627532959,
+            1.8668519258499146,
+            3.89673113822937
+          ],
+          "raw_gt1_fraction": 0.7130492329597473,
+          "near_bound_fraction": 0.7157802581787109,
+          "env_clip_change_mean": 1.5386779308319092
+        }
+      }
+    },
+    {
+      "iteration": 499,
+      "path": "logs/tuning/racing_ppo_opt55/stage2/stage1_3_seed1_500/model_499.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 10.9399995803833,
+        "survival": 0.41999998688697815,
+        "timeout_success": 0.0,
+        "collision": 0.5799999833106995,
+        "mean_episode_time": 9.647676467895508,
+        "mean_episode_return": 103.83818054199219,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.8250967264175415,
+            1.8321846723556519,
+            2.161980390548706,
+            2.8215770721435547
+          ],
+          "std": [
+            1.7345820665359497,
+            1.614199161529541,
+            1.5900375843048096,
+            4.7774810791015625
+          ],
+          "raw_abs_mean": [
+            0.8250967264175415,
+            1.8321846723556519,
+            2.161980390548706,
+            2.8215770721435547
+          ],
+          "raw_gt1_fraction": 0.5217907428741455,
+          "near_bound_fraction": 0.5232956409454346,
+          "env_clip_change_mean": 1.1526496410369873
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 20.19999885559082,
+        "survival": 0.3199999928474426,
+        "timeout_success": 0.14999999105930328,
+        "collision": 0.6800000071525574,
+        "mean_episode_time": 17.88509750366211,
+        "mean_episode_return": 287.07684326171875,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            2.0464634895324707,
+            1.8160516023635864,
+            2.081991672515869,
+            3.1669363975524902
+          ],
+          "std": [
+            1.7345833778381348,
+            1.6141859292984009,
+            1.5900267362594604,
+            4.777482986450195
+          ],
+          "raw_abs_mean": [
+            2.4510810375213623,
+            2.2488765716552734,
+            2.4303371906280518,
+            4.986393928527832
+          ],
+          "raw_gt1_fraction": 0.7684913277626038,
+          "near_bound_fraction": 0.7708654403686523,
+          "env_clip_change_mean": 2.146014451980591
+        }
+      }
+    }
+  ]
+}

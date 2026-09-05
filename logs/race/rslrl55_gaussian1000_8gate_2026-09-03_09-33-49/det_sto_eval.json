@@ -1,0 +1,511 @@
+{
+  "checksum": "8c975c09876e669b947411e67e2d3dc0ae6e971c0736874b27fe55e70b01b807",
+  "states_source": "generated:/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_gaussian1000_8gate_2026-09-03_09-33-49/eval_states_8gate_seed20250830.pt",
+  "n_states": 100,
+  "checkpoints": [
+    {
+      "iteration": 0,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_gaussian1000_8gate_2026-09-03_09-33-49/model_init.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.0,
+        "survival": 1.0,
+        "timeout_success": 0.0,
+        "collision": 0.0,
+        "mean_episode_time": 0.9317339658737183,
+        "mean_episode_return": -49.24054718017578,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.14690999686717987,
+            0.22853918373584747,
+            0.6275129318237305,
+            0.09207558631896973
+          ],
+          "std": [
+            0.2231302261352539,
+            0.2231302261352539,
+            0.2231302261352539,
+            0.2231302261352539
+          ],
+          "raw_abs_mean": [
+            0.14690999686717987,
+            0.22853918373584747,
+            0.6275129318237305,
+            0.09207558631896973
+          ],
+          "raw_gt1_fraction": 0.014061421155929565,
+          "near_bound_fraction": 0.015527949668467045,
+          "env_clip_change_mean": 0.0009585813386365771
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.0,
+        "survival": 1.0,
+        "timeout_success": 0.0,
+        "collision": 0.0,
+        "mean_episode_time": 0.9297360181808472,
+        "mean_episode_return": -49.76352310180664,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.14877477288246155,
+            0.22730807960033417,
+            0.6348050832748413,
+            0.09690245985984802
+          ],
+          "std": [
+            0.2231302559375763,
+            0.2231302559375763,
+            0.2231302559375763,
+            0.2231302559375763
+          ],
+          "raw_abs_mean": [
+            0.22654388844966888,
+            0.28462913632392883,
+            0.6481336951255798,
+            0.20078513026237488
+          ],
+          "raw_gt1_fraction": 0.037257954478263855,
+          "near_bound_fraction": 0.039332643151283264,
+          "env_clip_change_mean": 0.005373714026063681
+        }
+      }
+    },
+    {
+      "iteration": 50,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_gaussian1000_8gate_2026-09-03_09-33-49/model_50.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.0,
+        "survival": 0.6100000143051147,
+        "timeout_success": 0.0,
+        "collision": 0.38999998569488525,
+        "mean_episode_time": 2.454210042953491,
+        "mean_episode_return": -47.45738983154297,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.551872193813324,
+            0.19669875502586365,
+            0.1696092188358307,
+            0.2231815606355667
+          ],
+          "std": [
+            0.22453834116458893,
+            0.23940083384513855,
+            0.2363402247428894,
+            0.2382039725780487
+          ],
+          "raw_abs_mean": [
+            0.551872193813324,
+            0.19669875502586365,
+            0.1696092188358307,
+            0.2231815606355667
+          ],
+          "raw_gt1_fraction": 0.010441766120493412,
+          "near_bound_fraction": 0.011244979687035084,
+          "env_clip_change_mean": 0.0041504912078380585
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.04999999701976776,
+        "survival": 0.6599999666213989,
+        "timeout_success": 0.0,
+        "collision": 0.3400000035762787,
+        "mean_episode_time": 2.7046260833740234,
+        "mean_episode_return": -48.913421630859375,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5608838200569153,
+            0.18195639550685883,
+            0.17726387083530426,
+            0.21215777099132538
+          ],
+          "std": [
+            0.22453801333904266,
+            0.2394006997346878,
+            0.23634026944637299,
+            0.23820357024669647
+          ],
+          "raw_abs_mean": [
+            0.5639140009880066,
+            0.27801209688186646,
+            0.25986579060554504,
+            0.27486807107925415
+          ],
+          "raw_gt1_fraction": 0.01888226717710495,
+          "near_bound_fraction": 0.02031135931611061,
+          "env_clip_change_mean": 0.0039019945543259382
+        }
+      }
+    },
+    {
+      "iteration": 100,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_gaussian1000_8gate_2026-09-03_09-33-49/model_100.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.29999998211860657,
+        "survival": 0.7799999713897705,
+        "timeout_success": 0.0,
+        "collision": 0.32999998331069946,
+        "mean_episode_time": 2.6926381587982178,
+        "mean_episode_return": -51.47677230834961,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5762067437171936,
+            0.24753761291503906,
+            0.1565256267786026,
+            0.2178884893655777
+          ],
+          "std": [
+            0.2609938681125641,
+            0.27204781770706177,
+            0.2675636112689972,
+            0.2751849591732025
+          ],
+          "raw_abs_mean": [
+            0.5762067437171936,
+            0.24753761291503906,
+            0.1565256267786026,
+            0.2178884893655777
+          ],
+          "raw_gt1_fraction": 0.011483020149171352,
+          "near_bound_fraction": 0.011483020149171352,
+          "env_clip_change_mean": 0.003410045290365815
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.28999999165534973,
+        "survival": 0.6599999666213989,
+        "timeout_success": 0.0,
+        "collision": 0.3400000035762787,
+        "mean_episode_time": 2.510820150375366,
+        "mean_episode_return": -44.571590423583984,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5879278779029846,
+            0.23657400906085968,
+            0.15875281393527985,
+            0.20125412940979004
+          ],
+          "std": [
+            0.2609940767288208,
+            0.2720479369163513,
+            0.2675638496875763,
+            0.2751849293708801
+          ],
+          "raw_abs_mean": [
+            0.5913254618644714,
+            0.33731508255004883,
+            0.2639022171497345,
+            0.30737990140914917
+          ],
+          "raw_gt1_fraction": 0.03494764491915703,
+          "near_bound_fraction": 0.03658377006649971,
+          "env_clip_change_mean": 0.007441753055900335
+        }
+      }
+    },
+    {
+      "iteration": 150,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_gaussian1000_8gate_2026-09-03_09-33-49/model_150.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.8299999833106995,
+        "survival": 0.75,
+        "timeout_success": 0.0,
+        "collision": 0.25,
+        "mean_episode_time": 2.6207101345062256,
+        "mean_episode_return": -28.60999870300293,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5549866557121277,
+            0.2022518366575241,
+            0.21704696118831635,
+            0.19942234456539154
+          ],
+          "std": [
+            0.2827148139476776,
+            0.310162216424942,
+            0.3109946846961975,
+            0.3009427487850189
+          ],
+          "raw_abs_mean": [
+            0.5549866557121277,
+            0.2022518366575241,
+            0.21704696118831635,
+            0.19942234456539154
+          ],
+          "raw_gt1_fraction": 0.013739021494984627,
+          "near_bound_fraction": 0.014335006475448608,
+          "env_clip_change_mean": 0.0016635374631732702
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.8899999856948853,
+        "survival": 0.7699999809265137,
+        "timeout_success": 0.0,
+        "collision": 0.23999999463558197,
+        "mean_episode_time": 2.7002968788146973,
+        "mean_episode_return": -28.769020080566406,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5730043053627014,
+            0.21440978348255157,
+            0.2153751403093338,
+            0.2120412141084671
+          ],
+          "std": [
+            0.2827148139476776,
+            0.31016191840171814,
+            0.3109950125217438,
+            0.30094295740127563
+          ],
+          "raw_abs_mean": [
+            0.5844451785087585,
+            0.34363508224487305,
+            0.327543169260025,
+            0.33235451579093933
+          ],
+          "raw_gt1_fraction": 0.04714337736368179,
+          "near_bound_fraction": 0.04924473166465759,
+          "env_clip_change_mean": 0.009498468600213528
+        }
+      }
+    },
+    {
+      "iteration": 200,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_gaussian1000_8gate_2026-09-03_09-33-49/model_200.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 1.3799999952316284,
+        "survival": 0.75,
+        "timeout_success": 0.0,
+        "collision": 0.25,
+        "mean_episode_time": 2.644685983657837,
+        "mean_episode_return": -15.724889755249023,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5831965208053589,
+            0.30660104751586914,
+            0.20867644250392914,
+            0.24719269573688507
+          ],
+          "std": [
+            0.30512574315071106,
+            0.3484174907207489,
+            0.3501855134963989,
+            0.3470988869667053
+          ],
+          "raw_abs_mean": [
+            0.5831965208053589,
+            0.30660104751586914,
+            0.20867644250392914,
+            0.24719269573688507
+          ],
+          "raw_gt1_fraction": 0.03338721767067909,
+          "near_bound_fraction": 0.03441308066248894,
+          "env_clip_change_mean": 0.013126514852046967
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 1.0099999904632568,
+        "survival": 0.550000011920929,
+        "timeout_success": 0.0,
+        "collision": 0.4699999988079071,
+        "mean_episode_time": 2.5214760303497314,
+        "mean_episode_return": -16.849435806274414,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5797539949417114,
+            0.2721162438392639,
+            0.23915570974349976,
+            0.23723123967647552
+          ],
+          "std": [
+            0.3051256835460663,
+            0.34841740131378174,
+            0.3501855432987213,
+            0.347098708152771
+          ],
+          "raw_abs_mean": [
+            0.5943127274513245,
+            0.3968496024608612,
+            0.37704968452453613,
+            0.3882599174976349
+          ],
+          "raw_gt1_fraction": 0.06904979050159454,
+          "near_bound_fraction": 0.07159150391817093,
+          "env_clip_change_mean": 0.018081512302160263
+        }
+      }
+    },
+    {
+      "iteration": 500,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_gaussian1000_8gate_2026-09-03_09-33-49/model_500.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 4.019999980926514,
+        "survival": 0.9199999570846558,
+        "timeout_success": 0.0,
+        "collision": 0.07999999821186066,
+        "mean_episode_time": 6.262730598449707,
+        "mean_episode_return": 4.228515625,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5596935153007507,
+            0.9812407493591309,
+            0.964038610458374,
+            0.5296282172203064
+          ],
+          "std": [
+            0.8698224425315857,
+            1.0209293365478516,
+            0.8531289100646973,
+            1.616594672203064
+          ],
+          "raw_abs_mean": [
+            0.5596935153007507,
+            0.9812407493591309,
+            0.964038610458374,
+            0.5296282172203064
+          ],
+          "raw_gt1_fraction": 0.22532659769058228,
+          "near_bound_fraction": 0.22744221985340118,
+          "env_clip_change_mean": 0.1975441575050354
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 3.8899998664855957,
+        "survival": 0.4099999964237213,
+        "timeout_success": 0.0,
+        "collision": 0.5999999642372131,
+        "mean_episode_time": 5.984676361083984,
+        "mean_episode_return": 19.762720108032227,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            1.0060373544692993,
+            0.8808513283729553,
+            0.8392904996871948,
+            0.5322150588035583
+          ],
+          "std": [
+            0.8698292374610901,
+            1.0209285020828247,
+            0.8531358242034912,
+            1.6166026592254639
+          ],
+          "raw_abs_mean": [
+            1.1987898349761963,
+            1.2137470245361328,
+            1.0894572734832764,
+            1.3909666538238525
+          ],
+          "raw_gt1_fraction": 0.5080234408378601,
+          "near_bound_fraction": 0.5125885009765625,
+          "env_clip_change_mean": 0.47801679372787476
+        }
+      }
+    },
+    {
+      "iteration": 999,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_gaussian1000_8gate_2026-09-03_09-33-49/model_999.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 5.170000076293945,
+        "survival": 0.14000000059604645,
+        "timeout_success": 0.0,
+        "collision": 0.85999995470047,
+        "mean_episode_time": 4.958370208740234,
+        "mean_episode_return": 36.593807220458984,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.9328751564025879,
+            2.5747311115264893,
+            3.1700210571289062,
+            4.315637111663818
+          ],
+          "std": [
+            1.7012295722961426,
+            1.5946017503738403,
+            1.946653962135315,
+            5.497396945953369
+          ],
+          "raw_abs_mean": [
+            0.9328751564025879,
+            2.5747311115264893,
+            3.1700210571289062,
+            4.315637111663818
+          ],
+          "raw_gt1_fraction": 0.6218478679656982,
+          "near_bound_fraction": 0.6250500082969666,
+          "env_clip_change_mean": 1.9398939609527588
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 17.40999984741211,
+        "survival": 0.19999998807907104,
+        "timeout_success": 0.05999999865889549,
+        "collision": 0.7999999523162842,
+        "mean_episode_time": 14.810507774353027,
+        "mean_episode_return": 238.8197479248047,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            2.230255365371704,
+            2.043985605239868,
+            2.4993398189544678,
+            4.4144158363342285
+          ],
+          "std": [
+            1.7012251615524292,
+            1.5946109294891357,
+            1.946662187576294,
+            5.497351169586182
+          ],
+          "raw_abs_mean": [
+            2.5947587490081787,
+            2.4194998741149902,
+            2.961548089981079,
+            6.3567047119140625
+          ],
+          "raw_gt1_fraction": 0.7923153638839722,
+          "near_bound_fraction": 0.7942110300064087,
+          "env_clip_change_mean": 2.6877832412719727
+        }
+      }
+    }
+  ]
+}

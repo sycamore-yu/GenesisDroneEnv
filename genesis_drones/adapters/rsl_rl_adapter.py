@@ -23,7 +23,7 @@ class RslRlAdapter(VecEnv):
     def get_observations(self) -> TensorDict:
         return TensorDict(
             {"policy": self.policy_observation, "critic": self.critic_observation},
-            batch_size=self.num_envs,
+            batch_size=[self.num_envs],
         )
 
     def step(self, actions: torch.Tensor):

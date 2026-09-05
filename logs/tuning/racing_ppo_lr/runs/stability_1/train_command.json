@@ -1,0 +1,20 @@
+[
+  "/home/tong/anaconda3/envs/genesis/bin/python",
+  "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/scripts/train/race_train.py",
+  "--algo",
+  "ppo",
+  "--dynamics",
+  "full_quad",
+  "--seed",
+  "0",
+  "--updates",
+  "8",
+  "--save-interval",
+  "8",
+  "--log-dir",
+  "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/tuning/racing_ppo_lr/runs/stability_1",
+  "--ppo-config",
+  "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/tuning/racing_ppo_lr/runs/stability_1/ppo.yaml",
+  "--learning-rate",
+  "3e-05"
+]

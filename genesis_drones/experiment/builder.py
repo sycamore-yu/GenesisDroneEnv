@@ -19,7 +19,6 @@ from genesis_drones.algorithms.diff_rl import (
     build_diff_algorithm_config,
     make_diff_agent,
 )
-from genesis_drones.algorithms.squashed_actor_critic import SquashedActorCritic
 from genesis_drones.controllers.ctbr_controller import CtbrControllerConfig
 from genesis_drones.controllers.native_config import NativeQuadConfig
 from genesis_drones.dynamics import make_dynamics_backend
@@ -247,19 +246,18 @@ def _load_ppo_train_config(run_spec: RunSpec, cfg: dict[str, Any]) -> dict:
         with path.open() as file:
             train_config = yaml.safe_load(file)["train"]
         sizes = list(cfg.get("network", {}).get("hidden_sizes", [128, 128, 128]))
-        train_config["policy"]["actor_hidden_dims"] = sizes
-        train_config["policy"]["critic_hidden_dims"] = sizes
-        # RslRlAdapter exposes TensorDict keys policy/critic (not legacy "state").
-        train_config["obs_groups"] = {"policy": ["policy"], "critic": ["policy"]}
+        train_config["actor"]["hidden_dims"] = sizes
+        train_config["critic"]["hidden_dims"] = sizes
+        train_config["obs_groups"] = {"actor": ["policy"], "critic": ["policy"]}
         train_config["seed"] = run_spec.seed
         if cfg.get("_learning_rate") is not None:
             train_config["algorithm"]["learning_rate"] = cfg["_learning_rate"]
         return train_config
     with path.open() as file:
         train_config = yaml.safe_load(file)
-    sizes = list(cfg.get("network", {}).get("hidden_sizes", train_config["policy"].get("actor_hidden_dims", [256, 128])))
-    train_config["policy"]["actor_hidden_dims"] = sizes
-    train_config["policy"]["critic_hidden_dims"] = sizes
+    sizes = list(cfg.get("network", {}).get("hidden_sizes", train_config["actor"].get("hidden_dims", [256, 128])))
+    train_config["actor"]["hidden_dims"] = sizes
+    train_config["critic"]["hidden_dims"] = sizes
     train_config["seed"] = run_spec.seed
     if cfg.get("_learning_rate") is not None:
         train_config["algorithm"]["learning_rate"] = cfg["_learning_rate"]
@@ -317,36 +315,37 @@ def _load_diff_policy(payload, run_spec, environment, cfg, device):
     return DiffRLPolicyAdapter(agent, normalizer)
 
 
-def _load_ppo_policy(payload, run_spec, environment, cfg, device):
+def build_ppo_actor(train_config: dict[str, Any], obs_dim: int, action_dim: int, device):
     from tensordict import TensorDict
-    from rsl_rl.modules import ActorCritic
+    from rsl_rl.utils import resolve_class
 
-    train_config = _load_ppo_train_config(run_spec, cfg)
-    sizes = list(cfg.get("network", {}).get("hidden_sizes", train_config["policy"].get("actor_hidden_dims", [256, 128])))
-    train_config["policy"]["actor_hidden_dims"] = sizes
-    train_config["policy"]["critic_hidden_dims"] = sizes
-    policy_cfg = dict(train_config["policy"])
-    class_name = policy_cfg.pop("class_name", "ActorCritic")
-    policy_class = SquashedActorCritic if class_name == "SquashedActorCritic" else ActorCritic
-    zeros = torch.zeros(1, environment.task.policy_observation_dim, device=device)
-    dummy = TensorDict(
-        {"policy": zeros, "critic": zeros.clone()},
-        batch_size=1,
-    )
-    obs_groups = train_config.get("obs_groups", {"policy": ["policy"], "critic": ["policy"]})
-    # Ensure dummy contains every group name referenced by obs_groups.
+    zeros = torch.zeros(1, obs_dim, device=device)
+    dummy = TensorDict({"policy": zeros, "critic": zeros.clone()}, batch_size=[1])
+    obs_groups = train_config.get("obs_groups", {"actor": ["policy"], "critic": ["policy"]})
     for group_keys in obs_groups.values():
         for key in group_keys:
             if key not in dummy.keys():
                 dummy[key] = zeros.clone()
-    policy = policy_class(dummy, obs_groups, environment.action_dim, **policy_cfg)
-    state = payload.get("model_state_dict") or payload.get("model") or payload.get("actor_critic")
+    actor_class, actor_cfg = resolve_class(train_config["actor"])
+    actor = actor_class(dummy, obs_groups, "actor", action_dim, **actor_cfg)
+    return actor
+
+
+def _load_ppo_policy(payload, run_spec, environment, cfg, device):
+    train_config = _load_ppo_train_config(run_spec, cfg)
+    actor = build_ppo_actor(
+        train_config,
+        environment.task.policy_observation_dim,
+        environment.action_dim,
+        device,
+    )
+    state = payload.get("actor_state_dict")
     if state is None:
-        raise ValueError("PPO checkpoint missing model_state_dict")
-    policy.load_state_dict(state)
-    policy.to(device)
-    policy.eval()
-    return RslRlPolicyAdapter(policy)
+        raise ValueError("PPO checkpoint missing actor_state_dict")
+    actor.load_state_dict(state)
+    actor.to(device)
+    actor.eval()
+    return RslRlPolicyAdapter(actor)
 
 
 def run_spec_from_cfg(cfg: dict[str, Any]) -> RunSpec:

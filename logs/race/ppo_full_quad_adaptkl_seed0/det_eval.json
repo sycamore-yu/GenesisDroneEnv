@@ -1,0 +1,55 @@
+{
+  "checksum": "8c975c09876e669b947411e67e2d3dc0ae6e971c0736874b27fe55e70b01b807",
+  "checkpoints": [
+    {
+      "iter": 0,
+      "deterministic": {
+        "mean_passed_gates": 0.41999998688697815,
+        "survival": 0.8100000023841858,
+        "timeout_success": 0.0,
+        "collision": 0.1899999976158142,
+        "mean_episode_time": 1.3966020345687866
+      }
+    },
+    {
+      "iter": 50,
+      "deterministic": {
+        "mean_passed_gates": 0.41999998688697815,
+        "survival": 0.8100000023841858,
+        "timeout_success": 0.0,
+        "collision": 0.1899999976158142,
+        "mean_episode_time": 1.7372610569000244
+      }
+    },
+    {
+      "iter": 100,
+      "deterministic": {
+        "mean_passed_gates": 0.07999999821186066,
+        "survival": 0.6399999856948853,
+        "timeout_success": 0.0,
+        "collision": 0.35999998450279236,
+        "mean_episode_time": 1.777887225151062
+      }
+    },
+    {
+      "iter": 150,
+      "deterministic": {
+        "mean_passed_gates": 0.07999999821186066,
+        "survival": 0.8100000023841858,
+        "timeout_success": 0.0,
+        "collision": 0.1899999976158142,
+        "mean_episode_time": 2.2101211547851562
+      }
+    },
+    {
+      "iter": 199,
+      "deterministic": {
+        "mean_passed_gates": 0.1899999976158142,
+        "survival": 0.5099999904632568,
+        "timeout_success": 0.0,
+        "collision": 0.4899999797344208,
+        "mean_episode_time": 2.301363229751587
+      }
+    }
+  ]
+}

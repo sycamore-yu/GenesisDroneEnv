@@ -1,0 +1,79 @@
+{
+  "checksum": "8c975c09876e669b947411e67e2d3dc0ae6e971c0736874b27fe55e70b01b807",
+  "states_source": "logs/race/eval_states_8gate_seed20250830.pt",
+  "n_states": 100,
+  "checkpoints": [
+    {
+      "iteration": 199,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/tuning/racing_ppo_opt55/runs/stage1_7/model_199.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 1.8299999237060547,
+        "survival": 0.38999998569488525,
+        "timeout_success": 0.0,
+        "collision": 0.6100000143051147,
+        "mean_episode_time": 3.1701600551605225,
+        "mean_episode_return": -6.341483116149902,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5766578912734985,
+            0.37194207310676575,
+            0.39902132749557495,
+            0.3249242901802063
+          ],
+          "std": [
+            0.7267541289329529,
+            0.8209065794944763,
+            0.8489396572113037,
+            0.8710358142852783
+          ],
+          "raw_abs_mean": [
+            0.5766578912734985,
+            0.37194207310676575,
+            0.39902132749557495,
+            0.3249242901802063
+          ],
+          "raw_gt1_fraction": 0.06824324280023575,
+          "near_bound_fraction": 0.070036381483078,
+          "env_clip_change_mean": 0.026669126003980637
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 1.309999942779541,
+        "survival": 0.6399999856948853,
+        "timeout_success": 0.0,
+        "collision": 0.35999998450279236,
+        "mean_episode_time": 3.0476160049438477,
+        "mean_episode_return": -17.458637237548828,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.8028435111045837,
+            0.406404972076416,
+            0.38652074337005615,
+            0.311445027589798
+          ],
+          "std": [
+            0.7267547845840454,
+            0.8209058046340942,
+            0.8489404916763306,
+            0.8710353374481201
+          ],
+          "raw_abs_mean": [
+            0.9462172389030457,
+            0.7785987257957458,
+            0.7974623441696167,
+            0.7773135304450989
+          ],
+          "raw_gt1_fraction": 0.3287937641143799,
+          "near_bound_fraction": 0.33398184180259705,
+          "env_clip_change_mean": 0.18354803323745728
+        }
+      }
+    }
+  ]
+}

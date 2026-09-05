@@ -33,9 +33,7 @@ class RslRlPolicyAdapter:
         obs_t = detached_torch_tensor(observation)
         batch = int(obs_t.shape[0])
         obs = TensorDict({"policy": obs_t, "critic": obs_t}, batch_size=[batch])
-        if deterministic and hasattr(self.policy, "act_inference"):
-            return self.policy.act_inference(obs)
-        return self.policy.act(obs)
+        return self.policy(obs, stochastic_output=not deterministic)
 
 
 class CallablePolicyAdapter:

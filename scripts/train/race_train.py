@@ -74,6 +74,11 @@ def main() -> None:
     if args.learning_rate is not None and stack["kind"] == "ppo":
         stack["train_config"]["algorithm"]["learning_rate"] = args.learning_rate
         stack["runner"].alg.learning_rate = args.learning_rate
+    if args.save_interval is not None and stack["kind"] == "ppo":
+        stack["train_config"]["save_interval"] = args.save_interval
+        stack["runner"].save_interval = args.save_interval
+    if args.updates is not None and stack["kind"] == "ppo":
+        stack["train_config"]["max_iterations"] = args.updates
     if args.resume is not None and stack["kind"] == "ppo":
         stack["runner"].load(str(args.resume))
     updates = int(data.get("updates", 1000))

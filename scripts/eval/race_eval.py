@@ -130,27 +130,30 @@ def load_action_fn(args: argparse.Namespace, data: dict, environment: RaceEnv, p
         return lambda observation: agent.action(observation, normalizer, deterministic=True)
     from tensordict import TensorDict
 
-    from genesis_drones.algorithms.squashed_actor_critic import SquashedActorCritic
     from genesis_drones.envs.race_env import detached_torch_tensor
-    from rsl_rl.modules import ActorCritic
+    from genesis_drones.experiment.builder import build_ppo_actor
 
     dynamics = environment.dynamics
     config_name = "ppo_full_quad.yaml" if dynamics == "full_quad" else "ppo.yaml"
     with (PROJECT_ROOT / "config" / "race" / config_name).open() as file:
         train_config = yaml.safe_load(file)
     apply_network_hidden_sizes(train_config, data["network"]["hidden_sizes"])
-    policy_cfg = dict(train_config["policy"])
-    class_name = policy_cfg.pop("class_name")
-    policy_class = SquashedActorCritic if class_name == "SquashedActorCritic" else ActorCritic
-    dummy = TensorDict(
-        {"policy": torch.zeros(1, RaceEnv.policy_observation_dim, device=gs.device)},
-        batch_size=1,
+    actor = build_ppo_actor(
+        train_config,
+        RaceEnv.policy_observation_dim,
+        environment.action_dim,
+        gs.device,
     )
-    policy = policy_class(dummy, train_config["obs_groups"], environment.action_dim, **policy_cfg)
-    policy.load_state_dict(payload["model_state_dict"])
-    policy.to(gs.device)
-    policy.eval()
-    return lambda observation: policy.act_inference({"policy": detached_torch_tensor(observation)})
+    state = payload.get("actor_state_dict")
+    if state is None:
+        raise ValueError("PPO checkpoint missing actor_state_dict")
+    actor.load_state_dict(state)
+    actor.to(gs.device)
+    actor.eval()
+    return lambda observation: actor(
+        TensorDict({"policy": detached_torch_tensor(observation)}, batch_size=[observation.shape[0]]),
+        stochastic_output=False,
+    )
 
 
 if __name__ == "__main__":

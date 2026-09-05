@@ -1,0 +1,41 @@
+seed: 0
+max_iterations: 200
+num_steps_per_env: 16
+save_interval: 50
+obs_groups:
+  actor:
+  - policy
+  critic:
+  - policy
+algorithm:
+  class_name: PPO
+  clip_param: 0.2
+  desired_kl: 0.015336785259314192
+  entropy_coef: 0.010310590197194162
+  gamma: 0.99
+  lam: 0.95
+  learning_rate: 0.00010006531005435936
+  max_grad_norm: 1.0
+  num_learning_epochs: 4
+  num_mini_batches: 8
+  schedule: adaptive
+  use_clipped_value_loss: true
+  value_loss_coef: 2.0
+actor:
+  class_name: MLPModel
+  hidden_dims: &id001
+  - 256
+  - 128
+  activation: elu
+  obs_normalization: false
+  distribution_cfg:
+    class_name: GaussianDistribution
+    init_std: 0.33497699876036896
+    std_type: log
+critic:
+  class_name: MLPModel
+  hidden_dims: *id001
+  activation: elu
+  obs_normalization: false
+experiment_name: diffaero-racing-full-quad-ppo
+multi_gpu: null

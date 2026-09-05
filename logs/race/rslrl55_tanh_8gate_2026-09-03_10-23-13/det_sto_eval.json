@@ -1,0 +1,367 @@
+{
+  "checksum": "8c975c09876e669b947411e67e2d3dc0ae6e971c0736874b27fe55e70b01b807",
+  "states_source": "generated:/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_tanh_8gate_2026-09-03_10-23-13/eval_states_8gate_seed20250830.pt",
+  "n_states": 100,
+  "checkpoints": [
+    {
+      "iteration": 0,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_tanh_8gate_2026-09-03_10-23-13/model_init.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.0,
+        "survival": 1.0,
+        "timeout_success": 0.0,
+        "collision": 0.0,
+        "mean_episode_time": 0.9317339658737183,
+        "mean_episode_return": -49.16044998168945,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.14461080729961395,
+            0.22012820839881897,
+            0.528719425201416,
+            0.09078686684370041
+          ],
+          "std": [
+            0.2231302261352539,
+            0.2231302261352539,
+            0.2231302261352539,
+            0.2231302261352539
+          ],
+          "raw_abs_mean": [
+            0.14461080729961395,
+            0.22012820839881897,
+            0.528719425201416,
+            0.09078686684370041
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.0,
+        "survival": 1.0,
+        "timeout_success": 0.0,
+        "collision": 0.0,
+        "mean_episode_time": 0.9260729551315308,
+        "mean_episode_return": -49.47527313232422,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.1457180380821228,
+            0.2186480015516281,
+            0.5335652828216553,
+            0.09521769732236862
+          ],
+          "std": [
+            0.2231302410364151,
+            0.2231302410364151,
+            0.2231302410364151,
+            0.2231302410364151
+          ],
+          "raw_abs_mean": [
+            0.21523550152778625,
+            0.26468661427497864,
+            0.5328181385993958,
+            0.19257862865924835
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 50,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_tanh_8gate_2026-09-03_10-23-13/model_50.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.0,
+        "survival": 0.6899999976158142,
+        "timeout_success": 0.0,
+        "collision": 0.3100000023841858,
+        "mean_episode_time": 2.465865135192871,
+        "mean_episode_return": -48.20085525512695,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5911145210266113,
+            0.14293518662452698,
+            0.22006799280643463,
+            0.07262403517961502
+          ],
+          "std": [
+            0.21715758740901947,
+            0.2391759306192398,
+            0.23391662538051605,
+            0.23315034806728363
+          ],
+          "raw_abs_mean": [
+            0.5911145210266113,
+            0.14293518662452698,
+            0.22006799280643463,
+            0.07262403517961502
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.07000000029802322,
+        "survival": 0.7099999785423279,
+        "timeout_success": 0.0,
+        "collision": 0.28999999165534973,
+        "mean_episode_time": 2.696967124938965,
+        "mean_episode_return": -50.09633255004883,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.6050215363502502,
+            0.13741783797740936,
+            0.2094407081604004,
+            0.08472219854593277
+          ],
+          "std": [
+            0.21715769171714783,
+            0.23917566239833832,
+            0.23391643166542053,
+            0.23315034806728363
+          ],
+          "raw_abs_mean": [
+            0.5885125994682312,
+            0.23459117114543915,
+            0.27248138189315796,
+            0.20201121270656586
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 100,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_tanh_8gate_2026-09-03_10-23-13/model_100.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.14000000059604645,
+        "survival": 0.5899999737739563,
+        "timeout_success": 0.0,
+        "collision": 0.4099999964237213,
+        "mean_episode_time": 2.8158481121063232,
+        "mean_episode_return": -50.41237258911133,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5608330965042114,
+            0.1931934505701065,
+            0.0885935127735138,
+            0.11344993114471436
+          ],
+          "std": [
+            0.23988817632198334,
+            0.26732951402664185,
+            0.2588207423686981,
+            0.2652393877506256
+          ],
+          "raw_abs_mean": [
+            0.5608330965042114,
+            0.1931934505701065,
+            0.0885935127735138,
+            0.11344993114471436
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.07999999821186066,
+        "survival": 0.5600000023841858,
+        "timeout_success": 0.0,
+        "collision": 0.4399999976158142,
+        "mean_episode_time": 2.588076114654541,
+        "mean_episode_return": -44.40594482421875,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5848143100738525,
+            0.1722845435142517,
+            0.11033476144075394,
+            0.10383038222789764
+          ],
+          "std": [
+            0.23988811671733856,
+            0.26732969284057617,
+            0.2588210701942444,
+            0.26523953676223755
+          ],
+          "raw_abs_mean": [
+            0.5627495050430298,
+            0.2581120729446411,
+            0.22448047995567322,
+            0.2191624492406845
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 150,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_tanh_8gate_2026-09-03_10-23-13/model_150.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.3100000023841858,
+        "survival": 0.41999998688697815,
+        "timeout_success": 0.0,
+        "collision": 0.5799999833106995,
+        "mean_episode_time": 2.1125519275665283,
+        "mean_episode_return": -26.926279067993164,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5188089609146118,
+            0.16565443575382233,
+            0.196186363697052,
+            0.07063214480876923
+          ],
+          "std": [
+            0.25301358103752136,
+            0.29492026567459106,
+            0.2915392816066742,
+            0.3022952377796173
+          ],
+          "raw_abs_mean": [
+            0.5188089609146118,
+            0.16565443575382233,
+            0.196186363697052,
+            0.07063214480876923
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.5799999833106995,
+        "survival": 0.6200000047683716,
+        "timeout_success": 0.0,
+        "collision": 0.4099999964237213,
+        "mean_episode_time": 2.2344300746917725,
+        "mean_episode_return": -25.95524787902832,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5422870516777039,
+            0.17425397038459778,
+            0.18460272252559662,
+            0.07511776685714722
+          ],
+          "std": [
+            0.2530134320259094,
+            0.29492029547691345,
+            0.29153919219970703,
+            0.30229493975639343
+          ],
+          "raw_abs_mean": [
+            0.5305132269859314,
+            0.2743987739086151,
+            0.2838149666786194,
+            0.23709207773208618
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    },
+    {
+      "iteration": 199,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/rslrl55_tanh_8gate_2026-09-03_10-23-13/model_199.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 0.8700000047683716,
+        "survival": 0.5600000023841858,
+        "timeout_success": 0.0,
+        "collision": 0.4399999976158142,
+        "mean_episode_time": 2.1481828689575195,
+        "mean_episode_return": -15.825243949890137,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5839926600456238,
+            0.1542002111673355,
+            0.2277262955904007,
+            0.14418719708919525
+          ],
+          "std": [
+            0.2778499126434326,
+            0.3434557318687439,
+            0.3347642123699188,
+            0.3401595950126648
+          ],
+          "raw_abs_mean": [
+            0.5839926600456238,
+            0.1542002111673355,
+            0.2277262955904007,
+            0.14418719708919525
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 0.0,
+          "env_clip_change_mean": 0.0
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.8299999833106995,
+        "survival": 0.6800000071525574,
+        "timeout_success": 0.0,
+        "collision": 0.32999998331069946,
+        "mean_episode_time": 2.2574069499969482,
+        "mean_episode_return": -19.37776756286621,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5925222039222717,
+            0.1759057193994522,
+            0.23254550993442535,
+            0.13784046471118927
+          ],
+          "std": [
+            0.27784982323646545,
+            0.34345608949661255,
+            0.3347648084163666,
+            0.340160071849823
+          ],
+          "raw_abs_mean": [
+            0.5741791129112244,
+            0.3027990460395813,
+            0.3248395025730133,
+            0.27963677048683167
+          ],
+          "raw_gt1_fraction": 0.0,
+          "near_bound_fraction": 7.268498302437365e-05,
+          "env_clip_change_mean": 0.0
+        }
+      }
+    }
+  ]
+}

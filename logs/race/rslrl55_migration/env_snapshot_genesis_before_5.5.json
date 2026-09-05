@@ -1,0 +1,13 @@
+{
+  "recorded_at": "2026-09-03T14:15:52.735751+00:00",
+  "conda_env": "genesis",
+  "python": "3.11.16",
+  "torch": "2.13.0+cu130",
+  "cuda": "13.0",
+  "cuda_available": true,
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "genesis": "1.3.3",
+  "rsl-rl-lib": "3.1.3",
+  "tensordict": "0.14.0",
+  "optuna": "4.9.0"
+}

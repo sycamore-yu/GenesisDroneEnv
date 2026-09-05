@@ -1,0 +1,147 @@
+{
+  "phase": "replay",
+  "traj": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/diag_diffaero_success_traj.pt",
+  "diffaero_gates": 12,
+  "genesis_openloop_gates": 2,
+  "steps_compared": 115,
+  "first_divergence": {
+    "quantity": "attitude",
+    "step": 23,
+    "value": 5.097665786743164
+  },
+  "checkpoints": [
+    {
+      "t": 1,
+      "position_err": 0.002377391792833805,
+      "lin_vel_err": 0.001428185380063951,
+      "ang_vel_err": 0.03075450472533703,
+      "attitude_deg": 0.11869404464960098,
+      "thrust_genesis": 14.069639205932617,
+      "thrust_diffaero": 14.069639205932617,
+      "thrust_err": 0.0,
+      "torque_err": 3.725290298461914e-09,
+      "lin_acc_err": 0.08697286993265152,
+      "genesis_pos": [
+        1.0,
+        1.2246468525851679e-16,
+        1.5047234296798706
+      ],
+      "diffaero_pos": [
+        0.9999982714653015,
+        1.112925474444637e-06,
+        1.5023460388183594
+      ],
+      "genesis_gates": 0,
+      "diffaero_gates": 0,
+      "done": false
+    },
+    {
+      "t": 5,
+      "position_err": 0.00375245395116508,
+      "lin_vel_err": 0.0019743898883461952,
+      "ang_vel_err": 0.11270612478256226,
+      "attitude_deg": 0.9421073794364929,
+      "thrust_genesis": 9.9590482711792,
+      "thrust_diffaero": 9.9590482711792,
+      "thrust_err": 0.0,
+      "torque_err": 0.001960483845323324,
+      "lin_acc_err": 0.05992313474416733,
+      "genesis_pos": [
+        0.9989801049232483,
+        0.0006457777926698327,
+        1.5317050218582153
+      ],
+      "diffaero_pos": [
+        0.9992444515228271,
+        0.00048040103865787387,
+        1.5279655456542969
+      ],
+      "genesis_gates": 0,
+      "diffaero_gates": 0,
+      "done": false
+    },
+    {
+      "t": 10,
+      "position_err": 0.0051542469300329685,
+      "lin_vel_err": 0.002974072704091668,
+      "ang_vel_err": 0.1550402045249939,
+      "attitude_deg": 2.3887147903442383,
+      "thrust_genesis": 10.250655174255371,
+      "thrust_diffaero": 10.250655174255371,
+      "thrust_err": 0.0,
+      "torque_err": 0.003121973481029272,
+      "lin_acc_err": 0.07829577475786209,
+      "genesis_pos": [
+        0.9866105914115906,
+        0.008133959956467152,
+        1.567980170249939
+      ],
+      "diffaero_pos": [
+        0.9889346957206726,
+        0.006756308488547802,
+        1.5635907649993896
+      ],
+      "genesis_gates": 0,
+      "diffaero_gates": 0,
+      "done": false
+    },
+    {
+      "t": 30,
+      "position_err": 0.0460616797208786,
+      "lin_vel_err": 0.12809884548187256,
+      "ang_vel_err": 0.1498289257287979,
+      "attitude_deg": 5.8516621589660645,
+      "thrust_genesis": 10.059598922729492,
+      "thrust_diffaero": 10.059598922729492,
+      "thrust_err": 0.0,
+      "torque_err": 0.0015095289563760161,
+      "lin_acc_err": 0.5689616203308105,
+      "genesis_pos": [
+        0.42304250597953796,
+        0.30426374077796936,
+        1.7230409383773804
+      ],
+      "diffaero_pos": [
+        0.45074641704559326,
+        0.26755791902542114,
+        1.7204228639602661
+      ],
+      "genesis_gates": 0,
+      "diffaero_gates": 0,
+      "done": false
+    }
+  ],
+  "step1": {
+    "t": 1,
+    "position_err": 0.002377391792833805,
+    "lin_vel_err": 0.001428185380063951,
+    "ang_vel_err": 0.03075450472533703,
+    "attitude_deg": 0.11869404464960098,
+    "thrust_genesis": 14.069639205932617,
+    "thrust_diffaero": 14.069639205932617,
+    "thrust_err": 0.0,
+    "torque_err": 3.725290298461914e-09,
+    "lin_acc_err": 0.08697286993265152,
+    "genesis_pos": [
+      1.0,
+      1.2246468525851679e-16,
+      1.5047234296798706
+    ],
+    "diffaero_pos": [
+      0.9999982714653015,
+      1.112925474444637e-06,
+      1.5023460388183594
+    ],
+    "genesis_gates": 0,
+    "diffaero_gates": 0,
+    "done": false
+  },
+  "thresholds": {
+    "position_m": 0.05,
+    "lin_vel_mps": 0.2,
+    "ang_vel_radps": 0.2,
+    "attitude_deg": 5.0,
+    "thrust_n": 0.5,
+    "torque_nm": 0.05
+  }
+}

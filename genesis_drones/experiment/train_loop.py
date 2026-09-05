@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
 from torch.utils.tensorboard import SummaryWriter
 
 from genesis_drones.experiment.checkpoint import save_checkpoint
@@ -14,24 +15,20 @@ def train_ppo_stack(stack: dict, run_spec: RunSpec, updates: int, log_dir: Path)
     runner = stack["runner"]
     runner.learn(num_learning_iterations=updates, init_at_random_ep_len=True)
     train_config = stack.get("train_config") or {}
+    if train_config:
+        (log_dir / "train_config.yaml").write_text(yaml.safe_dump(train_config, sort_keys=False))
     network = {
         "hidden_sizes": list(
-            train_config.get("policy", {}).get(
-                "actor_hidden_dims",
+            train_config.get("actor", {}).get(
+                "hidden_dims",
                 run_spec.environment.get("hidden_sizes", [256, 128]),
             )
         )
     }
-    save_checkpoint(
-        log_dir / "model.pt",
-        {
-            "model_state_dict": runner.alg.policy.state_dict(),
-            "optimizer_state_dict": runner.alg.optimizer.state_dict(),
-            "iter": runner.current_learning_iteration,
-            "config": {"network": network, "environment": run_spec.environment},
-        },
-        run_spec,
-    )
+    payload = runner.alg.save()
+    payload["iter"] = runner.current_learning_iteration
+    payload["config"] = {"network": network, "environment": run_spec.environment}
+    save_checkpoint(log_dir / "model.pt", payload, run_spec)
 
 
 def train_diff_stack(stack: dict, run_spec: RunSpec, cfg: dict, updates: int, save_interval: int, log_dir: Path) -> None:

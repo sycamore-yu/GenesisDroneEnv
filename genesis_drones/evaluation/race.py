@@ -90,8 +90,8 @@ def resolve_experiment(
 
 def apply_network_hidden_sizes(train_config: dict, hidden_sizes) -> None:
     sizes = list(hidden_sizes)
-    train_config["policy"]["actor_hidden_dims"] = sizes
-    train_config["policy"]["critic_hidden_dims"] = sizes
+    train_config["actor"]["hidden_dims"] = sizes
+    train_config["critic"]["hidden_dims"] = sizes
 
 
 @dataclass

@@ -1,0 +1,367 @@
+{
+  "checksum": "8c975c09876e669b947411e67e2d3dc0ae6e971c0736874b27fe55e70b01b807",
+  "states_source": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/race/eval_states_8gate_seed20250830.pt",
+  "n_states": 100,
+  "checkpoints": [
+    {
+      "iteration": 100,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/tuning/racing_ppo_opt55/stage2/stage1_2_500/model_100.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 1.5999999046325684,
+        "survival": 0.8799999952316284,
+        "timeout_success": 0.0,
+        "collision": 0.11999999731779099,
+        "mean_episode_time": 2.592072010040283,
+        "mean_episode_return": -9.813305854797363,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.558674693107605,
+            0.3475777506828308,
+            0.23243489861488342,
+            0.17577064037322998
+          ],
+          "std": [
+            0.5368391275405884,
+            0.7696608901023865,
+            0.7817585468292236,
+            0.770110547542572
+          ],
+          "raw_abs_mean": [
+            0.558674693107605,
+            0.3475777506828308,
+            0.23243489861488342,
+            0.17577064037322998
+          ],
+          "raw_gt1_fraction": 0.01858193799853325,
+          "near_bound_fraction": 0.019184423610568047,
+          "env_clip_change_mean": 0.011664983816444874
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 0.9899999499320984,
+        "survival": 0.6699999570846558,
+        "timeout_success": 0.0,
+        "collision": 0.32999998331069946,
+        "mean_episode_time": 2.420909881591797,
+        "mean_episode_return": -20.357196807861328,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.6878976225852966,
+            0.34760475158691406,
+            0.21933282911777496,
+            0.18105922639369965
+          ],
+          "std": [
+            0.5368397235870361,
+            0.7696595191955566,
+            0.7817562818527222,
+            0.7701085805892944
+          ],
+          "raw_abs_mean": [
+            0.747516393661499,
+            0.7443921566009521,
+            0.6562367081642151,
+            0.6493294835090637
+          ],
+          "raw_gt1_fraction": 0.2520352900028229,
+          "near_bound_fraction": 0.256445050239563,
+          "env_clip_change_mean": 0.10624869912862778
+        }
+      }
+    },
+    {
+      "iteration": 200,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/tuning/racing_ppo_opt55/stage2/stage1_2_500/model_200.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 3.7300000190734863,
+        "survival": 0.6100000143051147,
+        "timeout_success": 0.0,
+        "collision": 0.38999998569488525,
+        "mean_episode_time": 5.611050128936768,
+        "mean_episode_return": 16.166418075561523,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            0.5885264277458191,
+            1.3256821632385254,
+            1.1402686834335327,
+            0.36256998777389526
+          ],
+          "std": [
+            1.1009743213653564,
+            1.6283659934997559,
+            1.311516523361206,
+            1.5902049541473389
+          ],
+          "raw_abs_mean": [
+            0.5885264277458191,
+            1.3256821632385254,
+            1.1402686834335327,
+            0.36256998777389526
+          ],
+          "raw_gt1_fraction": 0.26671090722084045,
+          "near_bound_fraction": 0.2697935104370117,
+          "env_clip_change_mean": 0.2723838984966278
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 3.919999837875366,
+        "survival": 0.3499999940395355,
+        "timeout_success": 0.0,
+        "collision": 0.6499999761581421,
+        "mean_episode_time": 6.826499938964844,
+        "mean_episode_return": 21.3950138092041,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            1.2262845039367676,
+            1.1659005880355835,
+            1.1422703266143799,
+            0.3908449113368988
+          ],
+          "std": [
+            1.100995659828186,
+            1.6283743381500244,
+            1.3114919662475586,
+            1.5902060270309448
+          ],
+          "raw_abs_mean": [
+            1.4705225229263306,
+            1.759492039680481,
+            1.5566924810409546,
+            1.3257817029953003
+          ],
+          "raw_gt1_fraction": 0.5995388627052307,
+          "near_bound_fraction": 0.6028276681900024,
+          "env_clip_change_mean": 0.7328832149505615
+        }
+      }
+    },
+    {
+      "iteration": 300,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/tuning/racing_ppo_opt55/stage2/stage1_2_500/model_300.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 3.8899998664855957,
+        "survival": 0.7799999713897705,
+        "timeout_success": 0.0,
+        "collision": 0.2199999988079071,
+        "mean_episode_time": 4.665663242340088,
+        "mean_episode_return": 9.183761596679688,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            1.116346836090088,
+            2.3684122562408447,
+            2.599581480026245,
+            1.4126226902008057
+          ],
+          "std": [
+            1.8532894849777222,
+            2.0734305381774902,
+            1.9450488090515137,
+            3.12296986579895
+          ],
+          "raw_abs_mean": [
+            1.116346836090088,
+            2.3684122562408447,
+            2.599581480026245,
+            1.4126226902008057
+          ],
+          "raw_gt1_fraction": 0.5085394382476807,
+          "near_bound_fraction": 0.5124725103378296,
+          "env_clip_change_mean": 1.1327521800994873
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 9.539999961853027,
+        "survival": 0.3799999952316284,
+        "timeout_success": 0.009999999776482582,
+        "collision": 0.6299999952316284,
+        "mean_episode_time": 11.526129722595215,
+        "mean_episode_return": 99.87179565429688,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            2.1262288093566895,
+            2.074025869369507,
+            2.108659029006958,
+            1.3015024662017822
+          ],
+          "std": [
+            1.8532944917678833,
+            2.0734403133392334,
+            1.9450534582138062,
+            3.122955799102783
+          ],
+          "raw_abs_mean": [
+            2.552661657333374,
+            2.671619415283203,
+            2.6088762283325195,
+            2.8306338787078857
+          ],
+          "raw_gt1_fraction": 0.7635972499847412,
+          "near_bound_fraction": 0.7659522294998169,
+          "env_clip_change_mean": 1.7848827838897705
+        }
+      }
+    },
+    {
+      "iteration": 400,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/tuning/racing_ppo_opt55/stage2/stage1_2_500/model_400.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 2.7300000190734863,
+        "survival": 0.5,
+        "timeout_success": 0.0,
+        "collision": 0.5,
+        "mean_episode_time": 3.221442222595215,
+        "mean_episode_return": -0.1352151483297348,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            1.2257392406463623,
+            3.5094456672668457,
+            3.6887545585632324,
+            2.5989625453948975
+          ],
+          "std": [
+            2.631181240081787,
+            2.76419734954834,
+            2.7680060863494873,
+            5.73652458190918
+          ],
+          "raw_abs_mean": [
+            1.2257392406463623,
+            3.5094456672668457,
+            3.6887545585632324,
+            2.5989625453948975
+          ],
+          "raw_gt1_fraction": 0.6441580057144165,
+          "near_bound_fraction": 0.6463577151298523,
+          "env_clip_change_mean": 1.945715069770813
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 11.869999885559082,
+        "survival": 0.23999999463558197,
+        "timeout_success": 0.04999999701976776,
+        "collision": 0.7699999809265137,
+        "mean_episode_time": 12.485169410705566,
+        "mean_episode_return": 142.8243865966797,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            2.9826624393463135,
+            2.927875280380249,
+            3.070080518722534,
+            2.7995288372039795
+          ],
+          "std": [
+            2.631187915802002,
+            2.764221429824829,
+            2.768015146255493,
+            5.736523628234863
+          ],
+          "raw_abs_mean": [
+            3.602524995803833,
+            3.699275016784668,
+            3.788468837738037,
+            5.3456196784973145
+          ],
+          "raw_gt1_fraction": 0.8437142968177795,
+          "near_bound_fraction": 0.8451573252677917,
+          "env_clip_change_mean": 3.1878724098205566
+        }
+      }
+    },
+    {
+      "iteration": 499,
+      "path": "/home/tong/tongworkspace/genesisworkspace/GenesisDroneEnv/logs/tuning/racing_ppo_opt55/stage2/stage1_2_500/model_499.pt",
+      "deterministic": {
+        "deterministic": true,
+        "mean_passed_gates": 2.679999828338623,
+        "survival": 0.6200000047683716,
+        "timeout_success": 0.0,
+        "collision": 0.3799999952316284,
+        "mean_episode_time": 3.099231004714966,
+        "mean_episode_return": -9.036011695861816,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            1.7903107404708862,
+            6.159041881561279,
+            7.663265228271484,
+            4.634429454803467
+          ],
+          "std": [
+            3.482304811477661,
+            3.9744327068328857,
+            4.123750686645508,
+            8.94584846496582
+          ],
+          "raw_abs_mean": [
+            1.7903107404708862,
+            6.159041881561279,
+            7.663265228271484,
+            4.634429454803467
+          ],
+          "raw_gt1_fraction": 0.7788082957267761,
+          "near_bound_fraction": 0.7801105380058289,
+          "env_clip_change_mean": 4.182677268981934
+        }
+      },
+      "stochastic": {
+        "deterministic": false,
+        "mean_passed_gates": 12.899999618530273,
+        "survival": 0.14999999105930328,
+        "timeout_success": 0.019999999552965164,
+        "collision": 0.8499999642372131,
+        "mean_episode_time": 12.119868278503418,
+        "mean_episode_return": 163.17933654785156,
+        "n_envs": 100,
+        "n_still_alive": 0,
+        "policy": {
+          "mu_abs_mean": [
+            4.0927934646606445,
+            4.514977931976318,
+            4.8382792472839355,
+            5.656949520111084
+          ],
+          "std": [
+            3.482290506362915,
+            3.974440336227417,
+            4.123765468597412,
+            8.94592571258545
+          ],
+          "raw_abs_mean": [
+            4.9011454582214355,
+            5.584528923034668,
+            5.8779616355896,
+            9.129005432128906
+          ],
+          "raw_gt1_fraction": 0.8968380093574524,
+          "near_bound_fraction": 0.8978997468948364,
+          "env_clip_change_mean": 5.424648284912109
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "baseline_det": {"200": 1.38, "500": 4.02, "1000": 5.17},
+  "diffaero_same_protocol_det": 8.13,
+  "stage1_best_at_200": {
+    "trial": "stage1_2",
+    "det": 4.41,
+    "note": "Stage2 extension collapsed: det@499=2.68 sto=12.9 std=5.13"
+  },
+  "stage2_at_499": {
+    "stage1_2": {"det": 2.68, "sto": 12.9, "coll": 0.38, "std": 5.13, "decision": "stop"},
+    "stage1_3": {"det": 9.0, "sto": 18.12, "coll": 0.61, "std": 2.28, "decision": "extend_1000", "peak_det_400": 15.37},
+    "stage1_8": {"det": 1.83, "sto": 1.67, "coll": 0.67, "std": 0.54, "decision": "stop"}
+  }
+}
